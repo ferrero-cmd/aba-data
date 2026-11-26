@@ -13,7 +13,7 @@ optionally paste the operational definition (it goes into the Excel file). Targe
 every future session is pre-loaded and the graphs line up over months.
 
 ## 3. Take data
-**Start session** → untick anything you're not collecting today → optionally pick the period → **Start now**.
+**Start session** → untick anything you're not collecting today → **Start now**.
 
 | Tile | What to do |
 |---|---|
@@ -27,9 +27,8 @@ every future session is pre-loaded and the graphs line up over months.
 | Interval rating | When it flashes, tap a number |
 | ABC | Tap → pick A, B, C chips → **Save ABC** |
 | Compliance | Tap the result after each instruction |
-| DBR | Tap → rate the three items 0–10 (end of period or session) |
+| DBR | Tap → rate the three items 0–10 (end of activity or session) |
 
-- Tap a **period chip** (Math, Recess…) when the activity changes — this feeds the scatterplot.
 - **Undo** at the bottom reverses the last tap. **Pause** stops the clock and intervals.
 - Every tap is saved immediately. If the phone locks or the app closes, open it and tap the orange
   **Session in progress** banner.
@@ -42,7 +41,7 @@ line and **Paste**.
 ## 5. Graphs
 Client → **Graphs**. Each target has its own graph; choose the measure with the chips. Tap a point to see
 that session. **Phases** adds a dashed phase-change line (e.g. *Baseline* → *Token board*); data lines
-don't connect across phases. Also: scatterplot by period × weekday, and an ABC summary with a
+don't connect across phases. Also: an ABC summary with a
 "possible function" hint.
 
 ## Back up

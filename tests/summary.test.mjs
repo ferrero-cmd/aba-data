@@ -2,15 +2,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { activeMs, emailSubject, newClient } from "../js/model.js";
-import { eventsByPeriod, intervalInfo, periodExposure, rawTable, summarize } from "../js/summary.js";
+import { intervalInfo, rawTable, summarize } from "../js/summary.js";
 
 const T0 = Date.UTC(2026, 10, 25, 14, 0, 0);
 const sec = (n) => n * 1000;
 const session = (trackers, minutes = 10, extra = {}) => ({
   id: "s", clientId: "c", status: "done", startedAt: T0, endedAt: T0 + minutes * 60000,
-  segments: [{ s: T0, e: T0 + minutes * 60000 }], periodLog: [], trackers, ...extra,
+  segments: [{ s: T0, e: T0 + minutes * 60000 }], trackers, ...extra,
 });
-const ev = (k, e, more = {}) => ({ k, e, t: T0 + e, p: null, ...more });
+const ev = (k, e, more = {}) => ({ k, e, t: T0 + e, ...more });
 const tracker = (type, events = [], config = {}, iv = {}) => ({ targetId: "x", name: type, type, config, events, iv });
 
 test("email subject uses both initials", () => {
@@ -61,7 +61,7 @@ test("MTS: missed moments are excluded from the denominator", () => {
   const tr = tracker("mts", [], { intervalSec: 15, intervalCount: 0 }, { 0: 1, 1: 0, 3: 1 });
   const s = summarize(tr, session([tr], 1)); // 4 intervals, one missed
   assert.equal(s.metrics[0].value, 66.7);
-  assert.equal(rawTable(tr, session([tr], 1)).rows[2][4], "Missed");
+  assert.equal(rawTable(tr, session([tr], 1)).rows[2][3], "Missed");
 });
 
 test("PLACHECK averages % engaged", () => {
@@ -82,13 +82,6 @@ test("DBR means per item", () => {
   assert.deepEqual(s.metrics.map((m) => m.value), [7, 3, 8.5]);
 });
 
-test("period exposure and events by period (scatterplot)", () => {
-  const tr = tracker("frequency", [ev("tap", sec(30), { p: "Math" }), ev("tap", sec(400), { p: "Recess" }), ev("tap", sec(420), { p: "Recess" })]);
-  const s = session([tr], 10, { periodLog: [{ e: 0, name: "Math" }, { e: sec(300), name: "Recess" }] });
-  assert.deepEqual(periodExposure(s), { Math: sec(300), Recess: sec(300) });
-  assert.deepEqual(eventsByPeriod(tr, s), { Math: 1, Recess: 2 });
-});
-
 test("raw tables have a row per event and matching column counts", () => {
   const trackers = [
     tracker("frequency", [ev("tap", 1000), ev("tap", 5000)]),
@@ -100,5 +93,5 @@ test("raw tables have a row per event and matching column counts", () => {
     const { columns, rows } = rawTable(tr, s);
     for (const r of rows) assert.equal(r.length, columns.length, tr.type);
   }
-  assert.equal(rawTable(trackers[1], s).rows[0][6], "Break given"); // function tag stripped
+  assert.equal(rawTable(trackers[1], s).rows[0][5], "Break given"); // function tag stripped
 });

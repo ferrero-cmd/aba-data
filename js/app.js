@@ -90,8 +90,7 @@ async function homeView() {
       list.replaceChildren(h("div", { class: "empty-state" },
         h("div", { class: "empty-art" }, icon.list()),
         h("h2", {}, "No clients yet"),
-        h("p", { class: "muted" }, "Add a client with just their first initial and school initial."),
-        h("button", { class: "btn primary", onclick: addClientSheet }, icon.plus(), "Add client")));
+        h("p", { class: "muted" }, "Tap + to add a client with just their first initial and school initial.")));
       return;
     }
     if (!shown.length) { list.replaceChildren(h("p", { class: "empty" }, "No matches")); return; }
@@ -142,8 +141,8 @@ function initialInput(placeholder, max) {
 
 function addClientSheet(existing) {
   const editing = existing && existing.id;
-  const first = initialInput("K", 3);
-  const school = initialInput("S", 4);
+  const first = initialInput("", 3);
+  const school = initialInput("", 4);
   const label = h("input", { class: "input", placeholder: "Optional note, e.g. Gr 3 or Rm 12", maxlength: 40 });
   if (editing) { first.value = existing.first; school.value = existing.school; label.value = existing.label || ""; }
   first.addEventListener("input", () => { if (first.value.length >= 1 && !editing) school.focus(); });
@@ -352,7 +351,6 @@ export function targetSheet(client, target, onSaved) {
 function startSessionSheet(client) {
   const live = client.targets.filter((t) => !t.archived);
   const picked = new Set(live.map((t) => t.id));
-  let periodName = null;
   const list = h("div", {});
   const drawList = () => {
     const targets = client.targets.filter((t) => !t.archived);
@@ -365,16 +363,9 @@ function startSessionSheet(client) {
       h("button", { class: "btn dashed", type: "button", onclick: () => targetSheet(client, null, (t) => { if (t) picked.add(t.id); drawList(); }) }, icon.plus(), "New target"));
   };
   drawList();
-  const periods = h("div", { class: "chips wrap" });
-  const drawPeriods = () => periods.replaceChildren(...settings.periods.map((p) =>
-    h("button", { class: `chip ${periodName === p ? "on" : ""}`, type: "button", onclick: () => { periodName = periodName === p ? null : p; drawPeriods(); } }, p)));
-  drawPeriods();
-
   sheet(`Start · ${initials(client)}`, (close) => h("div", { class: "stack" },
     h("div", { class: "field-label" }, "Collect data on"),
     list,
-    h("div", { class: "field-label" }, "Period / activity ", h("span", { class: "muted small" }, "(optional — switch any time during the session)")),
-    periods,
     h("button", { class: "btn big primary sticky-action", onclick: async () => {
       const chosen = client.targets.filter((t) => !t.archived && picked.has(t.id));
       if (!chosen.length) { toast("Pick at least one target"); return; }
@@ -383,7 +374,6 @@ function startSessionSheet(client) {
         id: uid(), clientId: client.id, status: "active", startedAt: now, endedAt: null,
         observer: settings.observer || "", notes: "",
         segments: [{ s: now }],
-        periodLog: periodName ? [{ e: 0, t: now, name: periodName }] : [],
         trackers: chosen.map((t) => ({ targetId: t.id, name: t.name, type: t.type, config: { ...t.config }, definition: t.definition || "", events: [], iv: {} })),
         undo: [],
       };
@@ -400,15 +390,14 @@ async function settingsView() {
   const info = await db.storageInfo();
   const lines = (arr) => arr.join("\n");
   const fromLines = (s) => s.split("\n").map((x) => x.trim()).filter(Boolean);
-  const observer = h("input", { class: "input", placeholder: "e.g. A. (BCBA)", value: settings.observer || "" });
-  const periods = h("textarea", { class: "input", rows: 7, value: lines(settings.periods) });
+  const observer = h("input", { class: "input", value: settings.observer || "", autocomplete: "off" });
   const abcA = h("textarea", { class: "input", rows: 6, value: lines(settings.abcA) });
   const abcC = h("textarea", { class: "input", rows: 6, value: lines(settings.abcC) });
   const save = async () => {
-    Object.assign(settings, { observer: observer.value.trim(), periods: fromLines(periods.value), abcA: fromLines(abcA.value), abcC: fromLines(abcC.value) });
+    Object.assign(settings, { observer: observer.value.trim(), abcA: fromLines(abcA.value), abcC: fromLines(abcC.value) });
     await db.saveSettings(settings);
   };
-  for (const el of [observer, periods, abcA, abcC]) el.addEventListener("change", () => save().then(() => toast("Saved")));
+  for (const el of [observer, abcA, abcC]) el.addEventListener("change", () => save().then(() => toast("Saved")));
 
   const fileInput = h("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: async (ev) => {
     const f = ev.target.files?.[0];
@@ -425,7 +414,6 @@ async function settingsView() {
     h("header", { class: "topbar" }, h("button", { class: "back-btn", onclick: () => go("#/") }, icon.back(), "Clients"), h("h1", {}, "Settings")),
     h("section", { class: "card stack" },
       field("Observer name", observer, "Shown on the Excel summary."),
-      field("Periods / activities", periods, "One per line. These are the chips you tap during a session (for scatterplots)."),
     ),
     h("section", { class: "card stack" },
       h("h2", { class: "card-title" }, "ABC options"),
@@ -450,7 +438,7 @@ async function settingsView() {
       h("h2", { class: "card-title" }, "Privacy"),
       h("p", { class: "muted small" }, "Clients are identified by initials only. Nothing is sent anywhere — no accounts, no servers, no analytics. Data leaves the phone only when you email an Excel file or save a backup."),
     ),
-    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.0"))));
+    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.1"))));
 }
 
 // ======================================================================

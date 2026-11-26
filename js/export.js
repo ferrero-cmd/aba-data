@@ -57,7 +57,6 @@ export async function buildWorkbook(client, session) {
   wb.created = new Date(session.startedAt);
 
   const e = sessionMs(session);
-  const periods = [...new Set((session.periodLog || []).map((p) => p.name).filter(Boolean))];
 
   // ---- Summary sheet ----
   const ws = wb.addWorksheet("Summary", { views: [{ showGridLines: false }] });
@@ -74,7 +73,6 @@ export async function buildWorkbook(client, session) {
     ["End", session.endedAt ? fmtTime(session.endedAt) : "In progress"],
     ["Observation time", `${fmtClock(e)} (${Math.round((e / 60000) * 10) / 10} min, pauses excluded)`],
     ...(session.observer ? [["Observer", session.observer]] : []),
-    ...(periods.length ? [["Periods / activities", periods.join(", ")]] : []),
     ...(session.notes ? [["Notes", session.notes]] : []),
   ];
   for (const [k, v] of info) {

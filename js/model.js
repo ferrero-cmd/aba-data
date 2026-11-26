@@ -85,7 +85,7 @@ export const TYPES = {
     label: "Direct Behavior Rating",
     short: "DBR",
     group: "Other",
-    blurb: "Rate Academic Engagement, Disruptive and Respectful from 0 to 10, once per period or session.",
+    blurb: "Rate Academic Engagement, Disruptive and Respectful from 0 to 10, once per activity or session.",
     config: [],
   },
 };
@@ -105,11 +105,6 @@ export const DBR_ITEMS = [
   { key: "ae", label: "Academic Engagement", hint: "higher is better" },
   { key: "db", label: "Disruptive Behavior", hint: "lower is better" },
   { key: "rs", label: "Respectful", hint: "higher is better" },
-];
-
-export const DEFAULT_PERIODS = [
-  "Arrival", "Morning meeting", "Math", "ELA", "Science", "Social studies", "Specials",
-  "Lunch", "Recess", "Transition", "Small group", "Independent work", "Dismissal",
 ];
 
 // "= escape" etc. marks the likely function of a consequence for the ABC summary hint.
@@ -134,7 +129,6 @@ export function parseOption(line) {
 export const defaultSettings = () => ({
   id: "main",
   observer: "",
-  periods: [...DEFAULT_PERIODS],
   abcA: [...DEFAULT_ABC.a],
   abcC: [...DEFAULT_ABC.c],
   sort: "school",

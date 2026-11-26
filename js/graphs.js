@@ -1,6 +1,6 @@
 // Phase 2: graphs for one client. Hand-drawn SVG so phase-change lines and broken data paths follow ABA conventions.
 import { DBR_ITEMS, parseOption, TYPES, uid } from "./model.js";
-import { eventsByPeriod, fmtDate, isoDate, periodExposure, round, summarize, supportsScatter } from "./summary.js";
+import { fmtDate, isoDate, round, summarize } from "./summary.js";
 import { h, segmented, sheet, toast, confirmSheet } from "./ui.js";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -13,7 +13,6 @@ const s = (tag, attrs = {}, ...kids) => {
 
 const RANGES = [["1m", "1 mo", 31], ["3m", "3 mo", 92], ["6m", "6 mo", 183], ["all", "All", Infinity]];
 const DAY = 86400000;
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 
 export async function graphsTab(client, allSessions, { go, settings, save }) {
   const done = allSessions.filter((x) => x.status === "done").sort((a, b) => a.startedAt - b.startedAt);
@@ -34,8 +33,6 @@ export async function graphsTab(client, allSessions, { go, settings, save }) {
     if (!sessions.length) { content.append(h("p", { class: "muted center" }, "No sessions in this range.")); return; }
     const targets = client.targets.filter((t) => sessions.some((x) => x.trackers.some((tr) => tr.targetId === t.id)));
     for (const t of targets) content.append(targetCard(client, t, sessions, go));
-    const scatterTargets = targets.filter((t) => supportsScatter(t.type));
-    if (scatterTargets.length && sessions.some((x) => (x.periodLog || []).length)) content.append(scatterCard(scatterTargets, sessions, settings));
     const abcRows = sessions.flatMap((x) => x.trackers.filter((tr) => tr.type === "abc").flatMap((tr) => tr.events.filter((ev) => ev.k === "abc")));
     if (abcRows.length) content.append(abcCard(abcRows, settings));
   };
@@ -240,60 +237,6 @@ function lineChart({ series, phases, yMax, unit, trend, onOpen }) {
 }
 
 const truncate = (str, n) => (str.length > n ? `${str.slice(0, Math.max(1, n - 1))}…` : str);
-
-// ---------- scatterplot (period × weekday heat grid) ----------
-function scatterCard(targets, sessions, settings) {
-  let targetId = targets[0].id;
-  const box = h("div", {});
-  const draw = () => {
-    const t = targets.find((x) => x.id === targetId);
-    const count = {};
-    const expo = {};
-    for (const ses of sessions) {
-      const wd = (new Date(ses.startedAt).getDay() + 6) % 7; // Mon = 0
-      if (wd > 4) continue;
-      const ex = periodExposure(ses);
-      for (const [p, ms] of Object.entries(ex)) expo[`${p}|${wd}`] = (expo[`${p}|${wd}`] || 0) + ms;
-      for (const tr of ses.trackers) {
-        if (tr.targetId !== t.id) continue;
-        for (const [p, n] of Object.entries(eventsByPeriod(tr, ses))) count[`${p}|${wd}`] = (count[`${p}|${wd}`] || 0) + n;
-      }
-    }
-    const seen = new Set(Object.keys(expo).map((k) => k.split("|")[0]));
-    const periods = [...settings.periods.filter((p) => seen.has(p)), ...[...seen].filter((p) => !settings.periods.includes(p))];
-    const isDur = t.type === "duration";
-    const val = (k) => {
-      if (!expo[k]) return null;
-      const hrs = expo[k] / 3600000;
-      return isDur ? round((100 * (count[k] || 0)) / (expo[k] / 60000)) : round((count[k] || 0) / hrs);
-    };
-    const vals = periods.flatMap((p) => WEEKDAYS.map((_, d) => val(`${p}|${d}`))).filter((v) => v != null);
-    const max = Math.max(...vals, 0.0001);
-    const step = (v) => (v == null ? "none" : v === 0 ? 0 : Math.min(5, 1 + Math.floor((v / max) * 4.999)));
-    box.replaceChildren(
-      periods.length ? h("div", { class: "heat", style: { "--cols": WEEKDAYS.length } },
-        h("div", {}), ...WEEKDAYS.map((d) => h("div", { class: "heat-col" }, d)),
-        ...periods.flatMap((p) => [h("div", { class: "heat-row" }, p), ...WEEKDAYS.map((d, i) => {
-          const v = val(`${p}|${i}`);
-          return h("div", { class: `heat-cell q${step(v)}`, title: v == null ? `${p} ${d}: not observed` : `${p} ${d}: ${v}${isDur ? "% of time" : " per hour"}` },
-            v == null ? "" : String(v));
-        })]))
-        : h("p", { class: "muted small" }, "Tag periods during sessions to see when behavior happens."),
-      h("div", { class: "heat-legend small muted" }, h("span", {}, isDur ? "% of observed time" : "Per hour of observation"),
-        h("span", { class: "heat-scale" }, ...[0, 1, 2, 3, 4, 5].map((q) => h("i", { class: `heat-cell q${q}` }))), h("span", {}, "Blank = not observed")));
-  };
-  draw();
-  return h("section", { class: "card graph-card" },
-    h("div", { class: "graph-title" }, h("div", { class: "grow" }, h("h3", {}, "Scatterplot by period"),
-      h("div", { class: "muted small" }, "When does the behavior happen? Stronger colour = more."))),
-    targets.length > 1 ? h("div", { class: "chips scroll" }, ...targets.map((t) => {
-      const b = h("button", { class: `chip small ${t.id === targetId ? "on" : ""}`, onclick: () => {
-        targetId = t.id; b.parentElement.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === b)); draw();
-      } }, t.name);
-      return b;
-    })) : null,
-    box);
-}
 
 // ---------- ABC summary ----------
 function abcCard(rows, settings) {

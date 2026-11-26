@@ -2,7 +2,7 @@
 
 A fast, offline iPhone web app (PWA) for BCBAs to take behavior data in schools: pick a client, start a
 session, tap tiles to record, then email a formatted Excel file. Client profiles show ABA-style graphs
-(phase-change lines, trend lines, scatterplot by period, ABC function summary).
+(phase-change lines, trend lines, ABC function summary).
 
 - **No server, no accounts.** Everything is stored on the phone (IndexedDB). Data leaves only when the user
   emails an Excel file or saves a backup.
@@ -17,8 +17,7 @@ session, tap tiles to record, then email a formatted Excel file. Client profiles
 | Interval | Partial interval, Whole interval, Momentary time sampling, PLACHECK (group), Interval rating (1–N) |
 | Other | ABC (tap-chips), Compliance (complied / after prompt / did not), Direct Behavior Rating (AE / DB / RS, 0–10) |
 
-A session runs several targets at once. Tapping a period chip (Math, Recess, …) tags later data for the
-scatterplot. Interval cue is a silent screen-edge flash. Pause excludes time from every measure.
+A session runs several targets at once. Interval cue is a silent screen-edge flash. Pause excludes time from every measure.
 
 ## Files
 
@@ -34,6 +33,7 @@ scatterplot. Interval cue is a silent screen-edge flash. Pause excludes time fro
 | `tests/` | `node --test tests/` |
 | `docs/AMANDA.md` | One-page how-to for users |
 | `docs/SHARING.md` | Publishing on GitHub Pages and installing on an iPhone |
+| `docs/IDEAS.md` | Parked features (period / activity tagging + scatterplot) and how to bring them back |
 
 ## Develop
 

@@ -2,7 +2,7 @@
 import * as db from "./db.js";
 import { emailSession, buildWorkbook, preloadExcel } from "./export.js";
 import { activeMs, DBR_ITEMS, initials, isRunning, INTERVAL_TYPES, parseOption, targetSpec, TYPES } from "./model.js";
-import { durationOpen, fmtClock, fmtDate, fmtTime, intervalInfo, latencyOpen, periodAt, sessionMs, summarize } from "./summary.js";
+import { durationOpen, fmtClock, fmtDate, fmtTime, intervalInfo, latencyOpen, sessionMs, summarize } from "./summary.js";
 import { confirmSheet, flash, h, icon, sheet, toast } from "./ui.js";
 
 // ======================================================================
@@ -17,11 +17,10 @@ export async function liveSession(root, id, { go, settings }) {
 
   const e = () => activeMs(session);
   const save = () => db.saveSession(session).catch(() => toast("Couldn't save — storage full?"));
-  const period = () => periodAt(session, e());
 
   function addEvent(i, ev, label) {
     const tr = session.trackers[i];
-    tr.events.push({ t: Date.now(), e: e(), p: period(), ...ev });
+    tr.events.push({ t: Date.now(), e: e(), ...ev });
     pushUndo({ i, kind: "ev", label: `${label} · ${tr.name}` });
   }
   function setInterval_(i, idx, value, label) {
@@ -41,9 +40,7 @@ export async function liveSession(root, id, { go, settings }) {
     if (!u) return;
     if (u.kind === "ev") session.trackers[u.i].events.pop();
     else if (u.kind === "iv") { const iv = session.trackers[u.i].iv; if (u.prev == null) delete iv[u.idx]; else iv[u.idx] = u.prev; }
-    else if (u.kind === "period") session.periodLog.pop();
     save();
-    renderPeriods();
     refresh();
     toast(`Undid ${u.label}`);
   }
@@ -51,7 +48,6 @@ export async function liveSession(root, id, { go, settings }) {
   // ---------- header ----------
   const clock = h("div", { class: "live-clock" }, "0:00");
   const pauseBtn = h("button", { class: "pill-btn", onclick: togglePause });
-  const periodRow = h("div", { class: "period-row" });
   const undoBar = h("div", { class: "undo-bar" });
 
   function togglePause() {
@@ -64,25 +60,6 @@ export async function liveSession(root, id, { go, settings }) {
     }
     save();
     refresh();
-  }
-
-  function renderPeriods() {
-    const current = period();
-    const names = [...new Set([...(settings.periods || []), ...(session.periodLog || []).map((p) => p.name)])].filter(Boolean);
-    periodRow.replaceChildren(
-      ...names.map((n) => h("button", {
-        class: `chip ${n === current ? "on" : ""}`,
-        onclick: () => {
-          if (n === period()) return;
-          session.periodLog.push({ e: e(), t: Date.now(), name: n });
-          pushUndo({ kind: "period", label: `period ${n}` });
-          renderPeriods();
-          toast(`Now: ${n}`);
-        },
-      }, n)),
-    );
-    const on = periodRow.querySelector(".on");
-    on?.scrollIntoView?.({ inline: "center", block: "nearest" });
   }
 
   // ---------- tiles ----------
@@ -294,7 +271,7 @@ export async function liveSession(root, id, { go, settings }) {
       return h("div", { class: "dbr-item" }, h("div", { class: "dbr-label" }, h("b", {}, it.label), h("span", { class: "muted small" }, ` · ${it.hint}`)), wrap,
         h("div", { class: "dbr-ends small muted" }, h("span", {}, "0 Never"), h("span", {}, "5 Sometimes"), h("span", {}, "10 Always")));
     });
-    sheet(`Rate ${period() ? `· ${period()}` : "this session"}`, (close) => h("div", {}, ...rows,
+    sheet("Rate this session", (close) => h("div", {}, ...rows,
       h("button", { class: "btn big primary sticky-action", onclick: () => {
         if (DBR_ITEMS.some((it) => vals[it.key] == null)) { toast("Rate all three"); return; }
         addEvent(i, { k: "dbr", ...vals }, "DBR");
@@ -319,7 +296,7 @@ export async function liveSession(root, id, { go, settings }) {
   async function finish() {
     const now = Date.now();
     session.trackers.forEach((tr) => {
-      if (tr.type === "duration" && durationOpen(tr)) tr.events.push({ t: now, e: e(), p: period(), k: "stop" });
+      if (tr.type === "duration" && durationOpen(tr)) tr.events.push({ t: now, e: e(), k: "stop" });
     });
     const seg = session.segments.at(-1);
     if (seg && seg.e == null) seg.e = now;
@@ -365,10 +342,8 @@ export async function liveSession(root, id, { go, settings }) {
       pauseBtn,
       h("button", { class: "pill-btn danger", onclick: endSession }, icon.stop(), "End")),
     h("div", { class: "live-head" }, clock, h("div", { class: "live-sub muted" }, `Started ${fmtTime(session.startedAt)}`)),
-    periodRow,
     grid,
     undoBar));
-  renderPeriods();
   refresh();
   const timer = setInterval(tick, 250);
 
@@ -432,14 +407,13 @@ export async function sessionSummary(root, id, { go }) {
     emailBtn.disabled = false;
   } }, icon.mail(), "Email Excel");
 
-  const periods = [...new Set((session.periodLog || []).map((p) => p.name).filter(Boolean))];
   root.append(h("main", { class: "view" },
     h("header", { class: "topbar" },
       h("button", { class: "back-btn", onclick: () => go(`#/c/${client.id}`) }, icon.back(), initials(client))),
     h("div", { class: "hero" },
       h("div", { class: "eyebrow" }, fmtDate(session.startedAt)),
       h("h1", {}, `${hm(session.startedAt)} – ${hm(session.endedAt)}`),
-      h("div", { class: "muted" }, `${fmtClock(e)} observed${periods.length ? ` · ${periods.join(", ")}` : ""}`)),
+      h("div", { class: "muted" }, `${fmtClock(e)} observed`)),
     h("div", { class: "actions" }, emailBtn,
       session.exportedAt ? h("div", { class: "muted small center" }, `Last exported ${fmtDate(session.exportedAt)} ${fmtTime(session.exportedAt)}`) : null),
     ...session.trackers.map((tr) => {

@@ -1,5 +1,6 @@
 // Pure calculations on a session's data, shared by the live screen, the Excel export and the graphs.
-// Every event stores t (wall clock ms), e (session ms excluding pauses) and p (class period at that moment).
+// Every event stores t (wall clock ms) and e (session ms excluding pauses).
+// (Older sessions may also carry p = class period and session.periodLog; see docs/IDEAS.md. They're ignored now.)
 import { activeMs, DBR_ITEMS, INTERVAL_TYPES, MOMENT_TYPES, parseOption } from "./model.js";
 
 // ---------- formatting ----------
@@ -28,26 +29,6 @@ const median = (xs) => {
 const secs = (ms) => round(ms / 1000, 1);
 
 export const sessionMs = (session) => activeMs(session);
-
-// ---------- class periods ----------
-export function periodAt(session, e) {
-  let p = null;
-  for (const entry of session.periodLog || []) if (entry.e <= e) p = entry.name;
-  return p;
-}
-
-// How long the session spent in each period: { Math: ms, Recess: ms }.
-export function periodExposure(session) {
-  const log = session.periodLog || [];
-  const end = sessionMs(session);
-  const out = {};
-  log.forEach((entry, i) => {
-    const until = i + 1 < log.length ? log[i + 1].e : end;
-    if (!entry.name) return;
-    out[entry.name] = (out[entry.name] || 0) + Math.max(0, until - entry.e);
-  });
-  return out;
-}
 
 // ---------- intervals ----------
 export function intervalInfo(tr, e) {
@@ -261,8 +242,8 @@ function mostCommon(xs) {
 // ---------- raw data for the Excel sheets ----------
 export function rawTable(tr, session) {
   const e = sessionMs(session);
-  const at = (ev) => [fmtTime(ev.t), fmtClock(ev.e), ev.p || ""];
-  const head = ["Time", "Session time", "Period"];
+  const at = (ev) => [fmtTime(ev.t), fmtClock(ev.e)];
+  const head = ["Time", "Session time"];
   const ev = tr.events || [];
   switch (tr.type) {
     case "frequency": {
@@ -274,14 +255,14 @@ export function rawTable(tr, session) {
     }
     case "duration":
       return {
-        columns: ["Episode", "Start time", "Start (session)", "End time", "End (session)", "Period", "Duration", "Seconds"],
+        columns: ["Episode", "Start time", "Start (session)", "End time", "End (session)", "Duration", "Seconds"],
         rows: durationEpisodes(tr, e).map((x, i) => [i + 1, fmtTime(x.start.t), fmtClock(x.start.e),
-          x.stop ? fmtTime(x.stop.t) : "(session ended)", fmtClock(x.stop ? x.stop.e : e), x.start.p || "", fmtClock(x.ms), secs(x.ms)]),
+          x.stop ? fmtTime(x.stop.t) : "(session ended)", fmtClock(x.stop ? x.stop.e : e), fmtClock(x.ms), secs(x.ms)]),
       };
     case "latency":
       return {
-        columns: ["Trial", "Instruction time", "Session time", "Period", "Response", "Latency (s)"],
-        rows: latencyTrials(tr).filter((x) => !x.pending).map((x, i) => [i + 1, fmtTime(x.sd.t), fmtClock(x.sd.e), x.sd.p || "",
+        columns: ["Trial", "Instruction time", "Session time", "Response", "Latency (s)"],
+        rows: latencyTrials(tr).filter((x) => !x.pending).map((x, i) => [i + 1, fmtTime(x.sd.t), fmtClock(x.sd.e),
           x.resp ? "Responded" : "No response", x.resp ? secs(x.resp.e - x.sd.e) : ""]),
       };
     case "pir":
@@ -299,11 +280,11 @@ export function rawTable(tr, session) {
         else if (tr.type === "mts") result = r == null ? "Missed" : r ? "Yes" : "No";
         else if (tr.type === "placheck") result = v ? `${v.engaged} of ${v.n} (${pct(v.engaged, v.n)}%)` : "Missed";
         else result = v == null ? "Missed" : v;
-        rows.push([i + 1, fmtClock(i * L), fmtClock((i + 1) * L), periodAt(session, i * L) || "", result,
+        rows.push([i + 1, fmtClock(i * L), fmtClock((i + 1) * L), result,
           tr.type === "placheck" ? (v ? pct(v.engaged, v.n) : "") : tr.type === "rating" ? (v ?? "") : r == null ? "" : r]);
       }
       const scoreCol = tr.type === "placheck" ? "% engaged" : tr.type === "rating" ? "Rating" : "Score (1 = yes)";
-      return { columns: ["Interval", "Start", "End", "Period", "Result", scoreCol], rows };
+      return { columns: ["Interval", "Start", "End", "Result", scoreCol], rows };
     }
     case "abc":
       return {
@@ -327,18 +308,4 @@ export function rawTable(tr, session) {
   }
 }
 
-// Count of a tracker's events in each period (for scatterplots).
-export function eventsByPeriod(tr, session) {
-  const out = {};
-  const add = (p, n = 1) => { if (p) out[p] = (out[p] || 0) + n; };
-  if (tr.type === "duration") {
-    for (const ep of durationEpisodes(tr, sessionMs(session))) add(ep.start.p, ep.ms / 60000); // minutes
-  } else {
-    const kind = { frequency: "tap", abc: "abc", compliance: "noncomply" }[tr.type];
-    for (const ev of tr.events || []) if (ev.k === kind) add(ev.p);
-  }
-  return out;
-}
-
-export const supportsScatter = (type) => ["frequency", "duration", "abc"].includes(type);
 export { INTERVAL_TYPES, MOMENT_TYPES };
