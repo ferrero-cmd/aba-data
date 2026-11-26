@@ -281,7 +281,19 @@ export async function liveSession(root, id, { go, settings }) {
   }
 
   // ---------- end ----------
-  async function endSession() {
+  // Back arrow: make leaving a deliberate choice, so a session isn't left running by accident.
+  function leaveSheet() {
+    const running = isRunning(session);
+    sheet("End this session?", (close) => h("div", { class: "stack" },
+      h("p", { class: "muted" }, running
+        ? `The clock is at ${fmtClock(e())}. If you leave it running, timing and intervals keep going and you can come back any time.`
+        : `The session is paused at ${fmtClock(e())}. You can come back to it any time.`),
+      h("button", { class: "btn big danger-fill", onclick: () => { close(); endSession({ confirmed: true }); } }, icon.stop(), "End session"),
+      h("button", { class: "btn big", onclick: () => { close(); go(`#/c/${client.id}`); } }, running ? "Leave it running" : "Leave it paused"),
+      h("button", { class: "btn big ghost", onclick: close }, "Stay here")));
+  }
+
+  async function endSession({ confirmed = false } = {}) {
     const unrated = session.trackers.findIndex((t) => t.type === "dbr" && !t.events.some((x) => x.k === "dbr"));
     if (unrated >= 0) {
       sheet("End session", (close) => h("div", { class: "stack" },
@@ -291,6 +303,7 @@ export async function liveSession(root, id, { go, settings }) {
         h("button", { class: "btn big ghost", onclick: close }, "Keep collecting")));
       return;
     }
+    if (confirmed) { finish(); return; }
     if (await confirmSheet("End session?", `Observation time ${fmtClock(e())}. You can email the Excel file next.`, "End session")) finish();
   }
   async function finish() {
@@ -337,10 +350,10 @@ export async function liveSession(root, id, { go, settings }) {
   // ---------- assemble ----------
   root.append(h("main", { class: "view live" },
     h("header", { class: "topbar" },
-      h("button", { class: "back-btn", onclick: () => go(`#/c/${client.id}`) }, icon.back(), initials(client)),
+      h("button", { class: "back-btn", onclick: leaveSheet }, icon.back(), initials(client)),
       h("div", { class: "grow" }),
       pauseBtn,
-      h("button", { class: "pill-btn danger", onclick: endSession }, icon.stop(), "End")),
+      h("button", { class: "pill-btn danger", onclick: () => endSession() }, icon.stop(), "End")),
     h("div", { class: "live-head" }, clock, h("div", { class: "live-sub muted" }, `Started ${fmtTime(session.startedAt)}`)),
     grid,
     undoBar));
