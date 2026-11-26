@@ -8,7 +8,7 @@ import { confirmSheet, flash, h, icon, sheet, toast } from "./ui.js";
 // ======================================================================
 // Live session
 // ======================================================================
-export async function liveSession(root, id, { go, settings }) {
+export async function liveSession(root, id, { go, settings, guard }) {
   const session = await db.get("sessions", id);
   if (!session) { go("#/"); return; }
   if (session.status !== "active") { go(`#/r/${id}`, true); return; }
@@ -281,32 +281,37 @@ export async function liveSession(root, id, { go, settings }) {
   }
 
   // ---------- end ----------
-  // Back arrow: make leaving a deliberate choice, so a session isn't left running by accident.
+  // Leaving (back arrow or swipe back) always asks: Yes ends the session, No keeps it going. Both go to the client.
+  const leave = (hash, replace = false) => { guard(null); go(hash, replace); };
+  let leaving = false;
   function leaveSheet() {
-    const running = isRunning(session);
+    if (leaving) return;
+    leaving = true;
     sheet("End this session?", (close) => h("div", { class: "stack" },
-      h("p", { class: "muted" }, running
-        ? `The clock is at ${fmtClock(e())}. If you leave it running, timing and intervals keep going and you can come back any time.`
-        : `The session is paused at ${fmtClock(e())}. You can come back to it any time.`),
-      h("button", { class: "btn big danger-fill", onclick: () => { close(); endSession({ confirmed: true }); } }, icon.stop(), "End session"),
-      h("button", { class: "btn big", onclick: () => { close(); go(`#/c/${client.id}`); } }, running ? "Leave it running" : "Leave it paused"),
-      h("button", { class: "btn big ghost", onclick: close }, "Stay here")));
+      h("p", { class: "muted" }, isRunning(session)
+        ? `${fmtClock(e())} so far. If you choose No, the session keeps running and you can return to it any time.`
+        : `${fmtClock(e())} so far (paused). If you choose No, you can return to it any time.`),
+      h("button", { class: "btn big danger-fill", onclick: () => { close(); endSession({ confirmed: true, to: `#/c/${client.id}` }); } }, "Yes"),
+      h("button", { class: "btn big", onclick: () => { close(); leave(`#/c/${client.id}`); } }, "No")),
+    { noClose: true, onClose: () => { leaving = false; } });
   }
+  guard(leaveSheet);
 
-  async function endSession({ confirmed = false } = {}) {
+  async function endSession({ confirmed = false, to = null } = {}) {
+    const finish = () => finishTo(to);
     const unrated = session.trackers.findIndex((t) => t.type === "dbr" && !t.events.some((x) => x.k === "dbr"));
     if (unrated >= 0) {
       sheet("End session", (close) => h("div", { class: "stack" },
         h("p", { class: "muted" }, `${session.trackers[unrated].name} hasn't been rated yet.`),
         h("button", { class: "btn big primary", onclick: () => { close(); dbrSheet(unrated, finish); } }, "Rate now, then end"),
         h("button", { class: "btn big", onclick: () => { close(); finish(); } }, "End without rating"),
-        h("button", { class: "btn big ghost", onclick: close }, "Keep collecting")));
+        h("button", { class: "btn big ghost", onclick: close }, "Keep collecting")), { noClose: true });
       return;
     }
     if (confirmed) { finish(); return; }
     if (await confirmSheet("End session?", `Observation time ${fmtClock(e())}. You can email the Excel file next.`, "End session")) finish();
   }
-  async function finish() {
+  async function finishTo(to) {
     const now = Date.now();
     session.trackers.forEach((tr) => {
       if (tr.type === "duration" && durationOpen(tr)) tr.events.push({ t: now, e: e(), k: "stop" });
@@ -317,7 +322,7 @@ export async function liveSession(root, id, { go, settings }) {
     session.endedAt = now;
     delete session.undo;
     await db.saveSession(session);
-    go(`#/r/${session.id}`, true);
+    leave(to || `#/r/${session.id}`, true);
   }
 
   // ---------- refresh / tick ----------

@@ -8,6 +8,11 @@ import { $, confirmSheet, download, field, h, hueFor, icon, segmented, sheet, sh
 const root = $("#app");
 let cleanup = null;
 let settings;
+// A live session can hold the user on its screen: any navigation it didn't ask for (e.g. the iOS
+// swipe-back gesture) is undone and the guard runs instead, so leaving always goes through its prompt.
+let leaveGuard = null;
+let shownHash = null;
+const guard = (fn) => { leaveGuard = fn; };
 
 function go(hash, replace = false) {
   if (replace) history.replaceState(null, "", hash);
@@ -16,13 +21,21 @@ function go(hash, replace = false) {
 }
 
 async function route() {
+  const target = location.hash || "#/";
+  if (leaveGuard && shownHash && target !== shownHash) {
+    history.pushState(null, "", shownHash);
+    leaveGuard();
+    return;
+  }
+  leaveGuard = null;
+  shownHash = target;
   cleanup?.();
   cleanup = null;
   document.querySelectorAll(".sheet, .sheet-backdrop").forEach((n) => n.remove());
   const [, view, id, tab] = (location.hash || "#/").split("/");
   root.className = "";
   root.replaceChildren();
-  const ctx = { go, settings };
+  const ctx = { go, settings, guard };
   try {
     if (view === "c" && id) await clientView(id, tab || "sessions");
     else if (view === "s" && id) cleanup = await liveSession(root, id, ctx);
@@ -40,6 +53,11 @@ async function route() {
 const avatar = (c, big = false) =>
   h("div", { class: `avatar ${big ? "big" : ""}`, style: { "--h": hueFor(c.school) } },
     h("span", {}, c.first), h("span", { class: "avatar-school" }, c.school));
+
+const resumeBanner = (s, c) =>
+  h("button", { class: "resume-banner", onclick: () => go(`#/s/${s.id}`) },
+    h("span", { class: "live-dot" }), h("div", { class: "grow" }, h("b", {}, `Session in progress · ${initials(c)}`),
+      h("div", { class: "small" }, `${fmtClock(sessionMs(s))} · tap to return`)), icon.chevron());
 
 const ago = (t) => {
   if (!t) return "No sessions yet";
@@ -118,9 +136,7 @@ async function homeView() {
       h("button", { class: "icon-btn", onclick: () => go("#/settings"), "aria-label": "Settings" }, icon.gear())),
     ...active.map((s) => {
       const c = clients.find((x) => x.id === s.clientId);
-      return c ? h("button", { class: "resume-banner", onclick: () => go(`#/s/${s.id}`) },
-        h("span", { class: "live-dot" }), h("div", { class: "grow" }, h("b", {}, `Session in progress · ${initials(c)}`),
-          h("div", { class: "small" }, `${fmtClock(sessionMs(s))} · tap to return`)), icon.chevron()) : null;
+      return c ? resumeBanner(s, c) : null;
     }),
     h("div", { class: "search" }, icon.search(), search),
     segmented([["school", "By school"], ["az", "A–Z"], ["recent", "Recent"]], settings.sort, async (v) => {
@@ -205,7 +221,7 @@ async function clientView(id, tab) {
       h("div", {}, h("h1", {}, initials(client)),
         h("div", { class: "muted" }, [client.label, `${sessions.length} session${sessions.length === 1 ? "" : "s"}`].filter(Boolean).join(" · ")))),
     active
-      ? h("button", { class: "btn big primary start", onclick: () => go(`#/s/${active.id}`) }, h("span", { class: "live-dot light" }), "Return to session")
+      ? resumeBanner(active, client)
       : h("button", { class: "btn big primary start", onclick: () => {
         if (!client.targets.some((t) => !t.archived)) { toast("Add a target first"); tabs.querySelectorAll("button")[1].click(); targetSheet(client, null, () => route()); return; }
         startSessionSheet(client);
@@ -438,7 +454,7 @@ async function settingsView() {
       h("h2", { class: "card-title" }, "Privacy"),
       h("p", { class: "muted small" }, "Clients are identified by initials only. Nothing is sent anywhere — no accounts, no servers, no analytics. Data leaves the phone only when you email an Excel file or save a backup."),
     ),
-    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.3"))));
+    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.4"))));
 }
 
 // ======================================================================

@@ -82,10 +82,9 @@ export function sheet(title, body, opts = {}) {
   };
   backdrop.addEventListener("click", () => { if (!opts.modal) close(); });
   panel.append(
-    h("div", { class: "sheet-grip" }),
     h("div", { class: "sheet-head" },
       h("h2", {}, title),
-      opts.modal ? null : h("button", { class: "sheet-close", onclick: close, "aria-label": "Close" }, icon.close())),
+      opts.modal || opts.noClose ? null : h("button", { class: "sheet-close", onclick: close, "aria-label": "Close" }, icon.close())),
     h("div", { class: "sheet-body" }, typeof body === "function" ? body(close) : body),
   );
   document.body.append(backdrop, panel);
@@ -101,7 +100,7 @@ export function confirmSheet(title, message, okLabel = "OK", { danger = false } 
       h("div", { class: "stack" },
         h("button", { class: `btn big ${danger ? "danger-fill" : "primary"}`, onclick: () => { answered = true; resolve(true); close(); } }, okLabel),
         h("button", { class: "btn big ghost", onclick: () => close() }, "Cancel"))),
-    { onClose: () => { if (!answered) resolve(false); } });
+    { noClose: true, onClose: () => { if (!answered) resolve(false); } });
     return s;
   });
 }
