@@ -3,7 +3,7 @@ import * as db from "./db.js";
 import { CONFIG_FIELDS, initials, INTERVAL_TYPES, newClient, newTarget, targetSpec, TYPES, uid } from "./model.js";
 import { liveSession, sessionSummary } from "./session.js";
 import { fmtDate, fmtTime, sessionMs, summarize, fmtClock } from "./summary.js";
-import { $, confirmSheet, download, field, h, hueFor, icon, segmented, sheet, shareFile, toast } from "./ui.js";
+import { $, closeAllSheets, confirmSheet, download, field, h, hueFor, icon, segmented, sheet, shareFile, toast } from "./ui.js";
 
 const root = $("#app");
 let cleanup = null;
@@ -31,7 +31,7 @@ async function route() {
   shownHash = target;
   cleanup?.();
   cleanup = null;
-  document.querySelectorAll(".sheet, .sheet-backdrop").forEach((n) => n.remove());
+  closeAllSheets();
   const [, view, id, tab] = (location.hash || "#/").split("/");
   root.className = "";
   root.replaceChildren();
@@ -454,7 +454,7 @@ async function settingsView() {
       h("h2", { class: "card-title" }, "Privacy"),
       h("p", { class: "muted small" }, "Clients are identified by initials only. Nothing is sent anywhere — no accounts, no servers, no analytics. Data leaves the phone only when you email an Excel file or save a backup."),
     ),
-    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.5"))));
+    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.6"))));
 }
 
 // ======================================================================

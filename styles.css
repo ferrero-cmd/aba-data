@@ -84,6 +84,7 @@ h1, h2, h3 { letter-spacing: -.015em; }
 .small { font-size: 14px; }
 .center { text-align: center; }
 .stack { display: grid; gap: 12px; }
+.stack > * { min-width: 0; }
 
 /* ---------- top bar ---------- */
 .topbar { display: flex; align-items: center; gap: 8px; min-height: 54px; }
@@ -236,6 +237,10 @@ h1, h2, h3 { letter-spacing: -.015em; }
   outline: none; transition: border-color .15s, box-shadow .15s;
 }
 textarea.input { resize: vertical; line-height: 1.4; }
+/* iOS gives date inputs a fixed intrinsic width that overflows narrow sheets */
+input[type="date"].input { -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%; text-align: left; }
+input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
+html.sheet-lock, html.sheet-lock body { overflow: hidden; }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .initials-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .initials-pair label { display: grid; gap: 6px; text-align: center; }
@@ -444,13 +449,16 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 .key { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
 .key.s0 { background: var(--s0); } .key.s1 { background: var(--s1); } .key.s2 { background: var(--s2); } .key.s3 { background: var(--s3); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); margin-top: 6px; }
-.chart-tip {
-  position: absolute; top: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px;
-  box-shadow: 0 6px 20px rgba(0,0,0,.14); font-size: 13px; min-width: 120px; z-index: 2;
+.chart-svg .dot.on { stroke-width: 3; }
+.chart-detail {
+  display: flex; align-items: center; gap: 10px; min-height: 52px; margin-top: 6px; padding: 6px 6px 6px 12px;
+  border-radius: 12px; background: var(--surface-2); font-size: 13px; transition: background .15s;
 }
-.tip-date { font-weight: 700; margin-bottom: 2px; }
-.tip-row { font-variant-numeric: tabular-nums; }
-.tip-open { border: 0; background: none; color: var(--accent); font-weight: 700; padding: 6px 0 0; font-size: 13px; }
+.chart-detail:not(.on) { justify-content: center; }
+.chart-detail.on { background: var(--accent-soft); }
+.detail-date { font-weight: 700; font-size: 13px; }
+.detail-vals { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.detail-open { border: 0; background: var(--surface); color: var(--accent); font-weight: 700; font-size: 14px; border-radius: 10px; padding: 8px 12px; min-height: 40px; white-space: nowrap; }
 .table-wrap details summary { color: var(--muted); font-size: 13px; font-weight: 600; padding: 8px 0 0; cursor: pointer; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; font-variant-numeric: tabular-nums; }
 .data-table th, .data-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }

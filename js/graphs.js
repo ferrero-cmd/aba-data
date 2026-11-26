@@ -146,13 +146,16 @@ function lineChart({ series, phases, yMax, unit, trend, onOpen }) {
   const box = h("div", { class: "chart" });
   if (!all.length) { box.append(h("p", { class: "muted small center" }, "No values for this measure yet.")); return box; }
 
-  const tMin = Math.min(...all.map((p) => p.t), ...phases.map((p) => p.t));
-  const tMax = Math.max(...all.map((p) => p.t));
-  const span = Math.max(tMax - tMin, DAY * 6);
-  const t0 = tMin - span * 0.04;
-  const t1 = tMin + span * 1.04;
+  // x axis = sessions in date order, evenly spaced (ABA session-by-session convention). Same-day
+  // sessions get their own slot instead of piling up on one date.
+  const sess = [...new Map([...all].sort((a, b) => a.t - b.t).map((p) => [p.sessionId, p])).values()];
+  const idx = new Map(sess.map((p, i) => [p.sessionId, i]));
+  const n = sess.length;
+  const slot = (W - pad.l - pad.r) / n;
+  const xi = (i) => pad.l + slot * (i + 0.5);
+  const xp = (p) => xi(idx.get(p.sessionId));
+  const boundary = (t) => { const k = sess.findIndex((p) => p.t >= t); return pad.l + slot * (k < 0 ? n : k); };
   const top = yMax ?? niceMax(Math.max(...all.map((p) => p.v)) * 1.1);
-  const x = (t) => pad.l + ((t - t0) / (t1 - t0)) * (W - pad.l - pad.r);
   const y = (v) => pad.t + (1 - v / top) * (H - pad.t - pad.b);
 
   const svgEl = s("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: "chart-svg", role: "img" });
@@ -165,74 +168,121 @@ function lineChart({ series, phases, yMax, unit, trend, onOpen }) {
     svgEl.append(s("line", { x1: pad.l, x2: W - pad.r, y1: y(v), y2: y(v), class: i ? "grid" : "axis" }),
       s("text", { x: pad.l - 6, y: y(v) + 4, class: "tick", "text-anchor": "end" }, `${round(v, v < 10 && top < 10 ? 1 : 0)}${i === ticks && unit === "%" ? "%" : ""}`));
   }
-  // x ticks: up to 5 dates
-  const nx = Math.min(5, Math.max(2, Math.round((W - 80) / 90)));
-  for (let i = 0; i < nx; i++) {
-    const t = tMin + ((tMax - tMin) * i) / Math.max(1, nx - 1);
-    if (tMax === tMin && i) break;
-    svgEl.append(s("text", { x: x(t), y: H - 8, class: "tick", "text-anchor": i === 0 && tMax !== tMin ? "start" : i === nx - 1 ? "end" : "middle" },
-      new Date(t).toLocaleDateString([], { month: "short", day: "numeric" })));
-  }
+  // x: a small mark per session; a date label on the first session of each day, skipped if it would collide
+  let lastX = -Infinity;
+  let lastDay = null;
+  sess.forEach((p, i) => {
+    const px = xi(i);
+    svgEl.append(s("line", { x1: px, x2: px, y1: H - pad.b, y2: H - pad.b + 4, class: "axis" }));
+    const day = isoDate(p.t);
+    if (day === lastDay) return;
+    lastDay = day;
+    if (px - lastX < 54) return;
+    lastX = px;
+    svgEl.append(s("text", { x: Math.min(W - 22, Math.max(22, px)), y: H - 8, class: "tick", "text-anchor": "middle" },
+      new Date(p.t).toLocaleDateString([], { month: "short", day: "numeric" })));
+  });
 
-  // phase-change lines (dashed, labelled) — ABA convention
+  // phase-change lines (dashed, labelled) between the last session before and the first on/after the date
   const bounds = [-Infinity, ...phases.map((p) => p.t), Infinity];
   phases.forEach((p, i) => {
-    const px = x(p.t);
+    const px = boundary(p.t);
     svgEl.append(s("line", { x1: px, x2: px, y1: pad.t - 8, y2: H - pad.b, class: "phase-line" }));
-    const next = phases[i + 1] ? x(phases[i + 1].t) : W - pad.r;
+    const next = phases[i + 1] ? boundary(phases[i + 1].t) : W - pad.r;
     svgEl.append(s("text", { x: px + 4, y: pad.t - 12, class: "phase-label" }, truncate(p.name, Math.max(4, Math.floor((next - px) / 7)))));
   });
   const phaseIndex = (t) => { let k = 0; for (let i = 1; i < bounds.length; i++) if (t >= bounds[i]) k = i; return k; };
 
   // series: separate path per phase (no line connecting across a phase change)
+  const dots = new Map(); // sessionId → circles
   for (const sr of series) {
     const pts = sr.pts.filter((p) => p.v != null);
     const groups = new Map();
     for (const p of pts) { const k = phaseIndex(p.t); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
     for (const g of groups.values()) {
-      if (g.length > 1) svgEl.append(s("path", { d: g.map((p, i) => `${i ? "L" : "M"}${x(p.t)},${y(p.v)}`).join(""), class: `line ${sr.cls}` }));
+      if (g.length > 1) svgEl.append(s("path", { d: g.map((p, i) => `${i ? "L" : "M"}${xp(p)},${y(p.v)}`).join(""), class: `line ${sr.cls}` }));
       if (trend && g.length > 2) {
-        const n = g.length;
-        const xs = g.map((p) => p.t);
+        const m = g.length;
+        const xs = g.map((p) => idx.get(p.sessionId));
         const ys = g.map((p) => p.v);
-        const mx = xs.reduce((a, b) => a + b, 0) / n;
-        const my = ys.reduce((a, b) => a + b, 0) / n;
+        const mx = xs.reduce((a, b) => a + b, 0) / m;
+        const my = ys.reduce((a, b) => a + b, 0) / m;
         const sl = xs.reduce((a, xx, i) => a + (xx - mx) * (ys[i] - my), 0) / (xs.reduce((a, xx) => a + (xx - mx) ** 2, 0) || 1);
-        const yv = (t) => Math.max(0, Math.min(top, my + sl * (t - mx)));
-        svgEl.append(s("line", { x1: x(xs[0]), y1: y(yv(xs[0])), x2: x(xs[n - 1]), y2: y(yv(xs[n - 1])), class: `trend ${sr.cls}` }));
+        const yv = (k) => Math.max(0, Math.min(top, my + sl * (k - mx)));
+        svgEl.append(s("line", { x1: xi(xs[0]), y1: y(yv(xs[0])), x2: xi(xs[m - 1]), y2: y(yv(xs[m - 1])), class: `trend ${sr.cls}` }));
       }
     }
-    for (const p of pts) svgEl.append(s("circle", { cx: x(p.t), cy: y(p.v), r: 4.5, class: `dot ${sr.cls}` }));
+    for (const p of pts) {
+      const c = s("circle", { cx: xp(p), cy: y(p.v), r: 4.5, class: `dot ${sr.cls}` });
+      if (!dots.has(p.sessionId)) dots.set(p.sessionId, []);
+      dots.get(p.sessionId).push(c);
+      svgEl.append(c);
+    }
   }
 
-  // hover / tap layer: nearest session → tooltip with Open
+  // ---- selection: tap a point → details in a strip under the chart (never covers the graph).
+  // Tap it again, tap empty space or anywhere outside the chart to clear. Drag sideways to step through sessions.
   const cursor = s("line", { y1: pad.t, y2: H - pad.b, class: "cursor", visibility: "hidden" });
-  svgEl.append(cursor);
-  const tip = h("div", { class: "chart-tip", hidden: true });
-  const sessionsX = [...new Map(all.map((p) => [p.sessionId, p])).values()];
-  const pick = (clientX) => {
-    const r = svgEl.getBoundingClientRect();
-    const px = ((clientX - r.left) / r.width) * W;
-    let best = sessionsX[0];
-    for (const p of sessionsX) if (Math.abs(x(p.t) - px) < Math.abs(x(best.t) - px)) best = p;
-    return best;
+  svgEl.insertBefore(cursor, svgEl.querySelector("circle"));
+  const detail = h("div", { class: "chart-detail" });
+  const hm = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  let sel = null;
+  const select = (p) => {
+    if (sel) for (const c of dots.get(sel.sessionId) || []) { c.setAttribute("r", 4.5); c.classList.remove("on"); }
+    sel = p;
+    if (!p) {
+      cursor.setAttribute("visibility", "hidden");
+      detail.classList.remove("on");
+      detail.replaceChildren(h("span", { class: "muted" }, "Tap a point for details"));
+      return;
+    }
+    for (const c of dots.get(p.sessionId) || []) { c.setAttribute("r", 7); c.classList.add("on"); }
+    cursor.setAttribute("x1", xp(p)); cursor.setAttribute("x2", xp(p)); cursor.setAttribute("visibility", "visible");
+    const vals = series.map((sr) => [sr, sr.pts.find((q) => q.sessionId === p.sessionId)?.v]);
+    detail.classList.add("on");
+    detail.replaceChildren(
+      h("div", { class: "grow" },
+        h("div", { class: "detail-date" }, `${new Date(p.t).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} · ${hm(p.t)}`),
+        h("div", { class: "detail-vals" }, ...vals.map(([sr, v]) => h("span", {},
+          series.length > 1 ? h("i", { class: `key ${sr.cls}` }) : null,
+          series.length > 1 ? `${sr.name.split(" ")[0]} ` : null, h("b", {}, v == null ? "—" : `${v}${unit}`))))),
+      h("button", { class: "detail-open", onclick: () => onOpen(p.sessionId) }, "Open ›"));
   };
-  const show = (p) => {
-    cursor.setAttribute("x1", x(p.t)); cursor.setAttribute("x2", x(p.t)); cursor.setAttribute("visibility", "visible");
-    const rows = series.map((sr) => [sr, sr.pts.find((q) => q.sessionId === p.sessionId)?.v]);
-    tip.replaceChildren(h("div", { class: "tip-date" }, fmtDate(p.t)),
-      ...rows.map(([sr, v]) => h("div", { class: "tip-row" }, series.length > 1 ? h("i", { class: `key ${sr.cls}` }) : null,
-        series.length > 1 ? h("span", { class: "muted" }, `${sr.name.split(" ")[0]} `) : null, h("b", {}, v == null ? "—" : `${v}${unit}`))),
-      h("button", { class: "tip-open", onclick: () => onOpen(p.sessionId) }, "Open session ›"));
-    tip.hidden = false;
-    const left = (x(p.t) / W) * 100;
-    tip.style.left = `${Math.min(78, Math.max(2, left - 12))}%`;
-  };
-  svgEl.addEventListener("pointermove", (ev) => { if (ev.pointerType === "mouse") show(pick(ev.clientX)); });
-  svgEl.addEventListener("pointerdown", (ev) => show(pick(ev.clientX)));
-  svgEl.addEventListener("pointerleave", (ev) => { if (ev.pointerType === "mouse") { cursor.setAttribute("visibility", "hidden"); tip.hidden = true; } });
+  select(null);
 
-  box.append(svgEl, tip);
+  const local = (ev) => {
+    const r = svgEl.getBoundingClientRect();
+    return [((ev.clientX - r.left) / r.width) * W, ((ev.clientY - r.top) / r.height) * H];
+  };
+  const nearest = (px, py) => {
+    let best = null;
+    let bd = Infinity;
+    for (const p of all) { const d = Math.hypot(xp(p) - px, y(p.v) - py); if (d < bd) { bd = d; best = p; } }
+    return [best, bd];
+  };
+  const nearestByX = (px) => sess[Math.max(0, Math.min(n - 1, Math.floor((px - pad.l) / slot)))];
+  let dragging = false;
+  svgEl.addEventListener("pointerdown", (ev) => {
+    const [px, py] = local(ev);
+    const [p, d] = nearest(px, py);
+    if (d > Math.max(28, Math.min(44, slot / 2 + 10))) { select(null); return; }
+    if (sel && sel.sessionId === p.sessionId) { select(null); return; }
+    select(p);
+    dragging = true;
+  });
+  svgEl.addEventListener("pointermove", (ev) => {
+    if (!dragging) return;
+    const p = nearestByX(local(ev)[0]);
+    if (p && p.sessionId !== sel?.sessionId) select(p);
+  });
+  for (const t of ["pointerup", "pointercancel", "pointerleave"]) svgEl.addEventListener(t, () => { dragging = false; });
+  const outside = (ev) => {
+    if (!box.isConnected) { document.removeEventListener("pointerdown", outside, true); return; }
+    if (sel && !box.contains(ev.target)) select(null);
+  };
+  document.addEventListener("pointerdown", outside, true);
+
+  box.append(svgEl, detail);
   return box;
 }
 

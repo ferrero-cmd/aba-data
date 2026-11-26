@@ -67,6 +67,29 @@ export function toast(message, ms = 2400) {
 }
 
 // ---------- bottom sheet ----------
+// While any sheet is open the page behind it must not scroll. iOS ignores overflow:hidden for touch
+// scrolling, so the body is pinned in place (position: fixed) and restored on close.
+let locks = 0;
+let savedY = 0;
+function lockScroll() {
+  if (locks++) return;
+  savedY = window.scrollY;
+  document.documentElement.classList.add("sheet-lock");
+  Object.assign(document.body.style, { position: "fixed", top: `-${savedY}px`, left: "0", right: "0" });
+}
+function unlockScroll(restore = true) {
+  if (!locks || --locks) return;
+  document.documentElement.classList.remove("sheet-lock");
+  Object.assign(document.body.style, { position: "", top: "", left: "", right: "" });
+  if (restore) window.scrollTo(0, savedY);
+}
+// Used on navigation: drop every sheet without restoring the old scroll position.
+export function closeAllSheets() {
+  document.querySelectorAll(".sheet, .sheet-backdrop").forEach((n) => n.remove());
+  locks = Math.min(locks, 1);
+  unlockScroll(false);
+}
+
 // sheet(title, body, { onClose }) → { close, el }. Body may be a Node or a function(close) → Node.
 export function sheet(title, body, opts = {}) {
   const backdrop = h("div", { class: "sheet-backdrop" });
@@ -75,6 +98,7 @@ export function sheet(title, body, opts = {}) {
   const close = () => {
     if (closed) return;
     closed = true;
+    if (panel.isConnected) unlockScroll();
     backdrop.classList.remove("open");
     panel.classList.remove("open");
     setTimeout(() => { backdrop.remove(); panel.remove(); }, 260);
@@ -88,6 +112,8 @@ export function sheet(title, body, opts = {}) {
     h("div", { class: "sheet-body" }, typeof body === "function" ? body(close) : body),
   );
   document.body.append(backdrop, panel);
+  lockScroll();
+  backdrop.addEventListener("touchmove", (ev) => ev.preventDefault(), { passive: false });
   requestAnimationFrame(() => { backdrop.classList.add("open"); panel.classList.add("open"); });
   return { close, el: panel };
 }
