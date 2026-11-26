@@ -438,13 +438,30 @@ async function settingsView() {
       h("h2", { class: "card-title" }, "Privacy"),
       h("p", { class: "muted small" }, "Clients are identified by initials only. Nothing is sent anywhere — no accounts, no servers, no analytics. Data leaves the phone only when you email an Excel file or save a backup."),
     ),
-    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.1"))));
+    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.2"))));
 }
 
 // ======================================================================
 // Boot
 // ======================================================================
+// No zooming: this is a tap-fast data tool, and an accidental zoom mid-session costs data.
+// iOS ignores user-scalable=no in places, so block pinch (WebKit gesture events) and double-tap here too.
+function blockZoom() {
+  const stop = (ev) => ev.preventDefault();
+  for (const type of ["gesturestart", "gesturechange", "gestureend"]) document.addEventListener(type, stop, { passive: false });
+  document.addEventListener("touchmove", (ev) => { if (ev.touches.length > 1) ev.preventDefault(); }, { passive: false });
+  // Double-tap: only cancel the second tap on non-interactive spots, so fast repeat taps on buttons/tiles still count.
+  let last = 0;
+  document.addEventListener("touchend", (ev) => {
+    const now = Date.now();
+    const interactive = ev.target.closest?.("button, a, input, textarea, select, label, summary, [contenteditable]");
+    if (!interactive && now - last < 350) ev.preventDefault();
+    last = now;
+  }, { passive: false });
+}
+
 async function boot() {
+  blockZoom();
   settings = await db.getSettings();
   db.persist();
   window.addEventListener("hashchange", route);
