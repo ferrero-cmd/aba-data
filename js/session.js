@@ -372,9 +372,17 @@ export async function liveSession(root, id, { go, settings, guard }) {
   document.addEventListener("visibilitychange", onVis);
   wake();
 
+  // iOS starts its swipe-back gesture from touches at the very left edge, and only tells the page
+  // after the slide has happened. Cancelling those touches stops the gesture before it begins
+  // (the 16px edge is page gutter, so no buttons live there). The leave guard stays as a fallback.
+  const EDGE = 16;
+  const onEdge = (ev) => { if (ev.touches.length === 1 && ev.touches[0].clientX < EDGE) ev.preventDefault(); };
+  document.addEventListener("touchstart", onEdge, { passive: false });
+
   return () => {
     clearInterval(timer);
     document.removeEventListener("visibilitychange", onVis);
+    document.removeEventListener("touchstart", onEdge);
     lock?.release?.().catch(() => {});
   };
 }
