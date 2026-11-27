@@ -254,15 +254,14 @@ export async function shareFile(file, title) {
 }
 
 // ---------- reorderable list editor ----------
-// listEditor({ items, starred, onChange(items, starred), counts?: () => Map, placeholder, hint })
-// Drag the handle to reorder, ★ pins an option to the top, tap the text to edit it.
+// listEditor({ items, onChange(items), counts?: () => Map, placeholder, labelOf })
+// Drag the handle to reorder, tap the text to edit it.
 // counts (optional) powers a one-off "Sort by most used" — the list never re-sorts by itself.
-export function listEditor({ items, starred = [], onChange, counts, placeholder = "Add an option", starrable = true, labelOf = (x) => x }) {
+export function listEditor({ items, onChange, counts, placeholder = "Add an option", labelOf = (x) => x }) {
   let list = [...items];
-  const star = new Set(starred.filter((x) => list.includes(x)));
   const wrap = h("div", { class: "list-editor" });
   const rows = h("div", { class: "le-rows" });
-  const commit = () => onChange([...list], list.filter((x) => star.has(x)));
+  const commit = () => onChange([...list]);
 
   const startDrag = (ev, row) => {
     ev.preventDefault();
@@ -299,7 +298,6 @@ export function listEditor({ items, starred = [], onChange, counts, placeholder 
       const v = input.value.trim();
       if (keep && v && v !== value && !list.includes(v)) {
         list[list.indexOf(value)] = v;
-        if (star.delete(value)) star.add(v);
         commit();
       }
       draw();
@@ -311,20 +309,14 @@ export function listEditor({ items, starred = [], onChange, counts, placeholder 
   };
 
   const draw = () => {
-    const shown = [...list.filter((x) => star.has(x)), ...list.filter((x) => !star.has(x))];
-    // Starred rows are pinned to the top, so the underlying order follows what's shown.
-    list = shown;
-    rows.replaceChildren(...shown.map((value) => {
-      const row = h("div", { class: `le-row ${star.has(value) ? "starred" : ""}`, "data-value": value });
+    rows.replaceChildren(...list.map((value) => {
+      const row = h("div", { class: "le-row", "data-value": value });
       row.append(
         h("button", { class: "le-handle", type: "button", "aria-label": `Drag to reorder ${labelOf(value)}`, onpointerdown: (ev) => startDrag(ev, row) },
           svg(P("M9 5h2v2H9zm4 0h2v2h-2zM9 11h2v2H9zm4 0h2v2h-2zm-4 6h2v2H9zm4 0h2v2h-2z"))),
-        starrable ? h("button", { class: `le-star ${star.has(value) ? "on" : ""}`, type: "button", "aria-pressed": star.has(value) ? "true" : "false",
-          "aria-label": star.has(value) ? `Unstar ${labelOf(value)}` : `Star ${labelOf(value)}`,
-          onclick: () => { star.has(value) ? star.delete(value) : star.add(value); commit(); draw(); } }, star.has(value) ? "★" : "☆") : null,
         h("button", { class: "le-text", type: "button", onclick: () => edit(row, value) }, value),
         h("button", { class: "le-del", type: "button", "aria-label": `Remove ${labelOf(value)}`, onclick: () => {
-          list = list.filter((x) => x !== value); star.delete(value); commit(); draw();
+          list = list.filter((x) => x !== value); commit(); draw();
         } }, icon.close()));
       return row;
     }));
@@ -345,9 +337,8 @@ export function listEditor({ items, starred = [], onChange, counts, placeholder 
     counts ? h("button", { class: "btn small ghost le-sort", type: "button", onclick: () => {
       const c = counts();
       if (![...c.values()].some(Boolean)) { toast("No ABC data yet to sort by"); return; }
-      // Most used first within the starred group and within the rest.
-      const by = (xs) => xs.map((x, i) => [x, c.get(labelOf(x)) || 0, i]).sort((p, q) => q[1] - p[1] || p[2] - q[2]).map((p) => p[0]);
-      list = [...by(list.filter((x) => star.has(x))), ...by(list.filter((x) => !star.has(x)))];
+      // Most used first; ties and unused options keep their current order.
+      list = list.map((x, i) => [x, c.get(labelOf(x)) || 0, i]).sort((p, q) => q[1] - p[1] || p[2] - q[2]).map((p) => p[0]);
       commit(); draw(); toast("Sorted by most used");
     } }, "Sort by most used") : null);
   return wrap;

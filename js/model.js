@@ -136,7 +136,6 @@ export const defaultSettings = () => ({
   observer: "",
   abcA: [...DEFAULT_ABC.a],
   abcC: [...DEFAULT_ABC.c],
-  abcStar: { a: [], c: [] },
   periods: [...DEFAULT_PERIODS],
   sort: "school",
 });
@@ -151,21 +150,39 @@ export function abcBehaviors(tr) {
 export const eventBehaviors = (ev) => (Array.isArray(ev.bs) ? ev.bs : ev.b ? [ev.b] : []);
 
 // Starred options first (keeping list order), then the rest in list order.
+// Stars were removed in v1.9 (dragging does the same job); this only migrates old data.
 export function orderOptions(list, starred = []) {
   const star = new Set(starred);
   return [...list.filter((x) => star.has(x)), ...list.filter((x) => !star.has(x))];
 }
 
-// The antecedent / consequence lists in force for a client: its own custom lists, or the global ones.
+// Folds old ★ stars into the list order (starred options move to the top once) and drops them.
+// Works on the settings record and on a client; returns true if anything changed.
+export function migrateStars(settings, client) {
+  let changed = false;
+  if (settings?.abcStar) {
+    settings.abcA = orderOptions(settings.abcA || [], settings.abcStar.a);
+    settings.abcC = orderOptions(settings.abcC || [], settings.abcStar.c);
+    delete settings.abcStar;
+    changed = true;
+  }
+  if (client?.abc?.star) {
+    client.abc.a = orderOptions(client.abc.a || [], client.abc.star.a);
+    client.abc.c = orderOptions(client.abc.c || [], client.abc.star.c);
+    delete client.abc.star;
+    changed = true;
+  }
+  return changed;
+}
+
+// The antecedent / consequence lists in force for a client, in order: its own custom lists, or the
+// global ones. (Old unmigrated stars still sort to the top so nothing jumps before migration runs.)
 export function abcLists(settings, client) {
   const own = client?.abc;
-  if (own) return { a: own.a || [], c: own.c || [], star: { a: own.star?.a || [], c: own.star?.c || [] } };
-  return { a: settings.abcA || [], c: settings.abcC || [], star: { a: settings.abcStar?.a || [], c: settings.abcStar?.c || [] } };
+  if (own) return { a: orderOptions(own.a || [], own.star?.a), c: orderOptions(own.c || [], own.star?.c) };
+  return { a: orderOptions(settings.abcA || [], settings.abcStar?.a), c: orderOptions(settings.abcC || [], settings.abcStar?.c) };
 }
-export function abcOptions(settings, client) {
-  const L = abcLists(settings, client);
-  return { a: orderOptions(L.a, L.star.a), c: orderOptions(L.c, L.star.c) };
-}
+export const abcOptions = abcLists;
 
 // How often each option was used in these sessions' ABC entries. key = "a" or "c".
 export function usageCounts(sessions, key) {

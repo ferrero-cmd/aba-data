@@ -1,6 +1,6 @@
 // ABA Data — router and the client / target / settings screens.
 import * as db from "./db.js";
-import { abcLists, CONFIG_FIELDS, initials, INTERVAL_TYPES, newClient, newTarget, parseOption, targetSpec, TYPES, uid, usageCounts } from "./model.js";
+import { abcLists, CONFIG_FIELDS, migrateStars, initials, INTERVAL_TYPES, newClient, newTarget, parseOption, targetSpec, TYPES, uid, usageCounts } from "./model.js";
 import { liveSession, sessionSummary } from "./session.js";
 import { fmtDate, fmtTime, sessionMs, summarize, fmtClock } from "./summary.js";
 import { $, closeAllSheets, confirmSheet, download, field, h, hueFor, icon, listEditor, segmented, sheet, shareFile, toast } from "./ui.js";
@@ -48,6 +48,25 @@ async function route() {
       h("button", { class: "btn", onclick: () => go("#/") }, "Back to clients")));
   }
   window.scrollTo(0, 0);
+  offerUpdate();
+}
+
+// ---------- updates ----------
+// A downloaded update waits until Amanda taps the banner, never mid-session; then the new version takes
+// over and the page reloads once, so every screen comes from the same version.
+let swReg = null;
+let updateRequested = false;
+function offerUpdate() {
+  const waiting = swReg?.waiting;
+  const banner = $(".update-banner");
+  const inSession = location.hash.startsWith("#/s/");
+  if (!waiting || !navigator.serviceWorker.controller || inSession) { banner?.remove(); return; }
+  if (banner) return;
+  document.body.append(h("button", { class: "update-banner", onclick: () => {
+    if (!swReg?.waiting) { location.reload(); return; }
+    updateRequested = true;
+    swReg.waiting.postMessage({ type: "skip-waiting" });
+  } }, "Update available — tap to reload"));
 }
 
 const avatar = (c, big = false) =>
@@ -264,12 +283,11 @@ async function clientAbcSheet(client) {
     const editor = (key) => {
       const L = abcLists(settings, client);
       return listEditor({
-        items: L[key], starred: L.star[key], labelOf: (x) => parseOption(x).label,
+        items: L[key], labelOf: (x) => parseOption(x).label,
         placeholder: key === "a" ? "Add an antecedent" : "Add a consequence",
         counts: () => usageCounts(sessions, key),
-        onChange: async (items, starred) => {
+        onChange: async (items) => {
           client.abc[key] = items;
-          client.abc.star[key] = starred;
           await db.saveClient(client);
         },
       });
@@ -279,7 +297,7 @@ async function clientAbcSheet(client) {
         h("input", { type: "checkbox", checked: custom, onchange: async (ev) => {
           if (ev.target.checked) {
             const L = abcLists(settings, null);
-            client.abc = { a: [...L.a], c: [...L.c], star: { a: [...L.star.a], c: [...L.star.c] } };
+            client.abc = { a: [...L.a], c: [...L.c] };
           } else {
             if (!(await confirmSheet("Use the default lists?", "This client's custom order and options will be removed. Past data isn't changed.", "Use defaults"))) { ev.target.checked = true; return; }
             client.abc = null;
@@ -290,7 +308,7 @@ async function clientAbcSheet(client) {
         h("span", { class: "grow" }, h("b", {}, "Custom lists for this client"),
           h("div", { class: "muted small" }, custom ? "Changes here only affect this client." : "Off: uses the default lists from Settings."))),
       custom ? [h("div", { class: "field-label" }, "Antecedents"), editor("a"), h("div", { class: "field-label" }, "Consequences"), editor("c"),
-        h("p", { class: "field-hint" }, "Drag ⋮⋮ to reorder, ★ keeps an option at the top. “Sort by most used” uses this client's ABC data.")] : null);
+        h("p", { class: "field-hint" }, "Drag ⋮⋮ to reorder — the top of the list shows first when logging. “Sort by most used” uses this client's ABC data.")] : null);
   };
   draw();
   sheet(`ABC options · ${initials(client)}`, body, { className: "tall" });
@@ -330,10 +348,27 @@ function multiEmailSheet(client, sessions) {
   const unsent = done.filter((s) => !s.exportedAt);
   const sent = done.filter((s) => s.exportedAt);
   const picked = new Set(unsent.map((s) => s.id));
-  const sendBtn = h("button", { class: "btn big primary sticky-action" });
+  const sendBtn = h("button", { class: "btn big primary" });
+  // iOS only opens the share sheet straight after a tap, and building the file (with graphs) takes a
+  // moment, so the file is built in the background whenever the ticks change and the tap just shares it.
+  let built = null; // { key, file: Promise<File|null> }
+  const chosenNow = () => done.filter((s) => picked.has(s.id));
+  const keyOf = () => chosenNow().map((s) => s.id).join(",");
+  let buildTimer;
+  const prebuild = () => {
+    clearTimeout(buildTimer);
+    if (!picked.size) return;
+    buildTimer = setTimeout(async () => {
+      const key = keyOf();
+      if (!key || built?.key === key) return;
+      const { buildWorkbook } = await import("./export.js");
+      built = { key, file: buildWorkbook(client, chosenNow(), sessions).catch(() => null) };
+    }, 300);
+  };
   const drawBtn = () => {
     sendBtn.replaceChildren(icon.mail(), picked.size ? `Email ${picked.size} session${picked.size === 1 ? "" : "s"}` : "Pick sessions to email");
     sendBtn.disabled = !picked.size;
+    prebuild();
   };
   const row = (s) => {
     const lines = s.trackers.slice(0, 3).map((tr) => `${tr.name}: ${summarize(tr, s).headline}`).join(" · ");
@@ -350,12 +385,15 @@ function multiEmailSheet(client, sessions) {
     drawBtn();
   };
   sendBtn.addEventListener("click", async () => {
-    const chosen = done.filter((s) => picked.has(s.id));
+    const chosen = chosenNow();
     if (!chosen.length) return;
     sendBtn.disabled = true;
     try {
-      const { emailSessions } = await import("./export.js");
-      const result = await emailSessions(client, chosen, undefined, sessions);
+      const { buildWorkbook, emailSessions } = await import("./export.js");
+      const key = keyOf();
+      if (built?.key !== key) { clearTimeout(buildTimer); built = { key, file: buildWorkbook(client, chosen, sessions).catch(() => null) }; }
+      const file = await built.file;
+      const result = await emailSessions(client, chosen, file || undefined, sessions);
       if (result === "shared" || result === "downloaded") {
         const now = Date.now();
         for (const s of chosen) { s.exportedAt = now; await db.saveSession(s); }
@@ -364,18 +402,17 @@ function multiEmailSheet(client, sessions) {
         return;
       }
     } catch (err) { toast(err.message || "Couldn't make the Excel file"); }
-    drawBtn();
+    sendBtn.disabled = false;
   });
-  drawBtn();
-  import("./export.js").then((m) => m.preloadExcel());
   const panel = sheet("Email sessions", h("div", { class: "stack" },
     h("p", { class: "muted small" }, "Ticked sessions go into one Excel file, with graphs of every session to date."),
     h("div", { class: "row-btns" },
       h("button", { class: "btn small", type: "button", onclick: () => setAll(true) }, "Select all"),
       h("button", { class: "btn small ghost", type: "button", onclick: () => setAll(false) }, "Clear")),
     unsent.length ? h("div", { class: "list-card" }, ...unsent.map(row)) : h("p", { class: "muted small" }, "Every session has been sent already."),
-    sent.length ? [h("div", { class: "group-title tight" }, "Already sent"), h("div", { class: "list-card" }, ...sent.map(row))] : null,
-    sendBtn), { className: "tall" });
+    sent.length ? [h("div", { class: "group-title tight" }, "Already sent"), h("div", { class: "list-card" }, ...sent.map(row))] : null),
+  { className: "tall", footer: sendBtn });
+  drawBtn();
 }
 
 // ---------- targets ----------
@@ -426,8 +463,14 @@ export function targetSheet(client, target, onSaved) {
     for (const [k, v] of Object.entries(TYPES[type].defaults || {})) cfg[k] ??= v;
     cfgBox.append(h("div", { class: "cfg-grid" }, ...fields.map((f) => {
       const F = CONFIG_FIELDS[f];
+      // Out-of-range values are pulled into range; the box shows the value that will be saved once you leave it.
       const input = h("input", { class: "input", type: "number", inputmode: "numeric", min: F.min, max: F.max, value: cfg[f],
-        oninput: (ev) => { cfg[f] = Math.max(F.min, Math.min(F.max, Number(ev.target.value) || 0)); } });
+        oninput: (ev) => { cfg[f] = Math.max(F.min, Math.min(F.max, Number(ev.target.value) || 0)); },
+        onchange: (ev) => {
+          if (String(cfg[f]) === ev.target.value) return;
+          ev.target.value = cfg[f];
+          toast(`${F.label}: ${F.min}–${F.max}${F.unit && !F.unit.includes("=") && F.unit !== "for your reference" ? ` ${F.unit}` : ""} — set to ${cfg[f]}`);
+        } });
       return field(F.label, input, F.unit);
     })));
     if (INTERVAL_TYPES.has(type)) {
@@ -541,21 +584,18 @@ async function settingsView() {
   const observer = h("input", { class: "input", value: settings.observer || "", autocomplete: "off" });
   observer.addEventListener("change", async () => { settings.observer = observer.value.trim(); await db.saveSettings(settings); toast("Saved"); });
   const allSessions = await db.getAll("sessions");
-  settings.abcStar ??= { a: [], c: [] };
   const abcEditor = (key) => listEditor({
     items: key === "a" ? settings.abcA : settings.abcC,
-    starred: settings.abcStar[key],
     labelOf: (x) => parseOption(x).label,
     placeholder: key === "a" ? "Add an antecedent" : "Add a consequence",
     counts: () => usageCounts(allSessions, key),
-    onChange: async (items, starred) => {
+    onChange: async (items) => {
       settings[key === "a" ? "abcA" : "abcC"] = items;
-      settings.abcStar[key] = starred;
       await db.saveSettings(settings);
     },
   });
   const periodsEditor = listEditor({
-    items: settings.periods || [], starrable: false, placeholder: "Add a period or activity",
+    items: settings.periods || [], placeholder: "Add a period or activity",
     onChange: async (items) => { settings.periods = items; await db.saveSettings(settings); },
   });
 
@@ -564,8 +604,10 @@ async function settingsView() {
     if (!f) return;
     try {
       const { added, updated } = await db.restore(JSON.parse(await f.text()));
-      toast(`Restored: ${added} added, ${updated} updated`, 3500);
       settings = await db.getSettings();
+      await migrateAllStars();
+      route();
+      toast(`Restored: ${added} added, ${updated} updated`, 3500);
     } catch (err) { toast(err.message || "Couldn't read that file"); }
     ev.target.value = "";
   } });
@@ -577,7 +619,7 @@ async function settingsView() {
     ),
     h("section", { class: "card stack" },
       h("h2", { class: "card-title" }, "ABC options"),
-      h("p", { class: "muted small" }, "The default lists for every client (a client can have its own from its ✎ menu). Drag ⋮⋮ to reorder, ★ keeps an option at the top, tap one to edit it."),
+      h("p", { class: "muted small" }, "The default lists for every client (a client can have its own from its ✎ menu). Drag ⋮⋮ to reorder (the top of the list shows first when logging), tap one to edit it."),
       h("div", { class: "field-label" }, "Antecedents"), abcEditor("a"),
       h("div", { class: "field-label" }, "Consequences"), abcEditor("c"),
       h("p", { class: "field-hint" }, "Add “= escape”, “= attention”, “= tangible” or “= automatic” to a consequence to feed the function hint on the graphs."),
@@ -605,7 +647,7 @@ async function settingsView() {
       h("h2", { class: "card-title" }, "Privacy"),
       h("p", { class: "muted small" }, "Clients are identified by initials only. Nothing is sent anywhere — no accounts, no servers, no analytics. Data leaves the phone only when you email an Excel file or save a backup."),
     ),
-    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.8.5"))));
+    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.9"))));
 }
 
 // ======================================================================
@@ -627,9 +669,16 @@ function blockZoom() {
   }, { passive: false });
 }
 
+// Old ★ stars become plain list order (starred options move to the top once).
+async function migrateAllStars() {
+  if (migrateStars(settings, null)) await db.saveSettings(settings);
+  for (const c of await db.getAll("clients")) if (migrateStars(null, c)) await db.saveClient(c);
+}
+
 async function boot() {
   blockZoom();
   settings = await db.getSettings();
+  await migrateAllStars().catch((err) => console.error(err));
   db.persist();
   // No swipe-back anywhere: iOS starts that gesture from touches at the very left edge and only tells
   // the page after the slide has happened, so those touches are cancelled before it begins. The 16px
@@ -642,15 +691,22 @@ async function boot() {
   // Offline cache everywhere except local development (add ?sw to test it locally).
   const dev = ["localhost", "127.0.0.1"].includes(location.hostname) && !location.search.includes("sw");
   if ("serviceWorker" in navigator && location.protocol !== "file:" && !dev) {
+    // Reload once the update Amanda tapped for has taken over (not on the very first install).
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!updateRequested) return;
+      updateRequested = false;
+      location.reload();
+    });
     navigator.serviceWorker.register("sw.js").then((reg) => {
+      swReg = reg;
+      offerUpdate();
       reg.addEventListener("updatefound", () => {
         const nw = reg.installing;
-        nw?.addEventListener("statechange", () => {
-          if (nw.state === "installed" && navigator.serviceWorker.controller && !location.hash.startsWith("#/s/")) {
-            const b = h("button", { class: "update-banner", onclick: () => location.reload() }, "Update available — tap to reload");
-            document.body.append(b);
-          }
-        });
+        nw?.addEventListener("statechange", () => { if (nw.state === "installed") offerUpdate(); });
+      });
+      // A Home Screen app resumed from the background doesn't reload, so check for updates on resume too.
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") reg.update().catch(() => {});
       });
     }).catch(() => {});
   }

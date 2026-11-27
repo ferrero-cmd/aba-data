@@ -166,7 +166,7 @@ export function summarize(tr, session, e = sessionMs(session)) {
     case "pir":
     case "wir":
     case "mts": {
-      const { completed } = intervalInfo(tr, e);
+      const { completed, finished, L } = intervalInfo(tr, e);
       const results = [];
       for (let i = 0; i < completed; i++) results.push(intervalResult(tr, i));
       const scored = results.filter((r) => r != null);
@@ -179,7 +179,10 @@ export function summarize(tr, session, e = sessionMs(session)) {
         metrics: [{ key: "pct", label: "% of intervals", value: p, unit: "%" },
           { key: "yes", label: `Intervals ${word.toLowerCase()}`, value: yes, unit: "" }],
         details: [["Intervals scored", scored.length], [word, yes], ["% of intervals", p == null ? "—" : `${p}%`],
-          ...(missed ? [["Missed (not scored)", missed]] : [])],
+          ...(missed ? [["Missed (not scored)", missed]] : []),
+          // Only whole intervals count. If the session ended part-way through one that was marked, say so.
+          ...(session.status === "done" && !finished && e % L > 0 && tr.iv?.[completed] != null && tr.type !== "mts"
+            ? [["Last interval (cut short by End)", `${tr.type === "pir" ? "Occurred" : "Stopped"} · not counted`]] : [])],
       };
     }
     case "placheck": {

@@ -1,7 +1,7 @@
 // node --test tests/
 import test from "node:test";
 import assert from "node:assert/strict";
-import { abcBehaviors, abcOptions, eventBehaviors, orderOptions, sortByUsage, usageCounts } from "../js/model.js";
+import { abcBehaviors, abcOptions, eventBehaviors, migrateStars, orderOptions, sortByUsage, usageCounts } from "../js/model.js";
 import { eventsByPeriod, periodAt, periodExposure, rawTable } from "../js/summary.js";
 import { graphData } from "../js/xlsxcharts.js";
 
@@ -26,6 +26,16 @@ test("ABC events: multiple behaviors kept, old events fall back to b", () => {
 
 test("starred options come first, list order kept", () => {
   assert.deepEqual(orderOptions(["a", "b", "c", "d"], ["c", "a"]), ["a", "c", "b", "d"]);
+});
+
+test("old stars fold into the list order once and are dropped", () => {
+  const settings = { abcA: ["x", "y", "z"], abcC: ["p", "q"], abcStar: { a: ["z"], c: ["q"] } };
+  const client = { abc: { a: ["m", "n"], c: ["r"], star: { a: ["n"], c: [] } } };
+  assert.equal(migrateStars(settings, client), true);
+  assert.deepEqual([settings.abcA, settings.abcC, settings.abcStar], [["z", "x", "y"], ["q", "p"], undefined]);
+  assert.deepEqual([client.abc.a, client.abc.star], [["n", "m"], undefined]);
+  assert.equal(migrateStars(settings, client), false);
+  assert.equal(migrateStars(settings, { abc: null }), false);
 });
 
 test("client lists override the global lists", () => {
@@ -72,4 +82,20 @@ test("graph data: every session to date, split by phase, phase line between sess
   assert.deepEqual(b.phaseLines, [{ name: "Token board", x: 2.5 }]);
   assert.deepEqual(b.rows.map((r) => r.inFile), [false, false, false, true]);
   assert.equal(b.rows[1].vals.rateHr, 24); // 4 taps in 10 min
+});
+
+test("restoring settings: newer record wins, older backups fill in defaults only", async () => {
+  const { mergeSettings } = await import("../js/db.js");
+  const { defaultSettings } = await import("../js/model.js");
+  const fresh = { ...defaultSettings(), sort: "az" }; // new phone: only the sort was changed
+  const backup = { ...defaultSettings(), abcA: ["Custom A"], observer: "Amanda", sort: "recent" };
+  const m = mergeSettings(fresh, backup);
+  assert.deepEqual([m.abcA, m.observer, m.sort], [["Custom A"], "Amanda", "az"]);
+  // Phone already customised: an undated backup doesn't overwrite what was changed here.
+  const kept = mergeSettings({ ...defaultSettings(), abcA: ["Mine"], observer: "Bea" }, backup);
+  assert.deepEqual([kept.abcA, kept.observer, kept.sort], [["Mine"], "Bea", "recent"]);
+  assert.equal(mergeSettings({ ...backup }, backup), null);
+  // A newer dated backup wins.
+  assert.deepEqual(mergeSettings({ ...defaultSettings(), abcA: ["Mine"], updatedAt: 5 }, { ...backup, updatedAt: 9 }).abcA, ["Custom A"]);
+  assert.equal(mergeSettings(null, backup).id, "main");
 });

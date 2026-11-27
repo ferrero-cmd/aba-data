@@ -95,3 +95,14 @@ test("raw tables have a row per event and matching column counts", () => {
   }
   assert.equal(rawTable(trackers[1], s).rows[0][5], "Break given"); // function tag stripped
 });
+
+test("a marked interval cut short by End is reported, not counted", async () => {
+  const { summarize } = await import("../js/summary.js");
+  const tr = { type: "pir", config: { intervalSec: 10 }, iv: { 0: 1, 2: 1 }, events: [] };
+  const session = { status: "done", segments: [{ s: 0, e: 25000 }], endedAt: 25000, trackers: [tr] };
+  const s = summarize(tr, session);
+  assert.equal(s.metrics[0].value, 50); // 2 whole intervals, 1 occurred
+  assert.ok(s.details.some(([k, v]) => k.startsWith("Last interval") && v.startsWith("Occurred")));
+  const live = summarize(tr, { ...session, status: "active" });
+  assert.ok(!live.details.some(([k]) => k.startsWith("Last interval")));
+});

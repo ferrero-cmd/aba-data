@@ -563,12 +563,9 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 .le-row { display: flex; align-items: center; gap: 2px; min-height: 48px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .le-row:last-child { border-bottom: 0; }
 .le-row.dragging { background: var(--accent-soft); box-shadow: var(--shadow-lift); position: relative; z-index: 1; }
-.le-row.starred { background: var(--surface-2); }
-.le-handle, .le-star, .le-del { border: 0; background: none; width: 44px; height: 48px; display: grid; place-items: center; color: var(--faint); flex: none; padding: 0; }
+.le-handle, .le-del { border: 0; background: none; width: 44px; height: 48px; display: grid; place-items: center; color: var(--faint); flex: none; padding: 0; }
 .le-handle { touch-action: none; cursor: grab; }
 .le-handle svg, .le-del svg { width: 20px; height: 20px; fill: currentColor; }
-.le-star { font-size: 20px; color: var(--faint); width: 36px; }
-.le-star.on { color: #d99a00; }
 .le-text { flex: 1; min-width: 0; text-align: left; border: 0; background: none; color: var(--text); font: inherit; font-size: 15px; padding: 12px 4px; overflow-wrap: anywhere; }
 .le-input { flex: 1; min-width: 0; margin: 4px 0; }
 .le-add { display: flex; gap: 8px; }

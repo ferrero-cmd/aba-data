@@ -416,7 +416,7 @@ export async function liveSession(root, id, { go, settings, guard }) {
       return;
     }
     if (confirmed) { finish(); return; }
-    if (await confirmSheet("End session?", `Observation time ${fmtClock(e())}. You can email the Excel file next.`, "End session")) finish();
+    if (await confirmSheet("End session?", `Observation time ${fmtClock(e())}. Email it later from the client's Sessions tab.`, "End session")) finish();
   }
   async function finishTo(to) {
     const now = Date.now();

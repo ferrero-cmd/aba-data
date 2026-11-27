@@ -1,6 +1,6 @@
 // Keeps the whole app on the phone so it opens and works with no signal.
 // Bump VERSION whenever any file changes; the app then shows "Update available".
-const VERSION = "v14";
+const VERSION = "v15";
 const CACHE = `aba-data-${VERSION}`;
 const SHELL = [
   "./", "index.html", "styles.css", "manifest.webmanifest",
@@ -9,10 +9,20 @@ const SHELL = [
   "icons/icon-192.png", "icons/apple-touch-icon.png",
 ];
 
+// A new version waits until Amanda taps "Update available" (or closes the app), so an open screen never
+// mixes old and new files. Versions before v15 took over straight away and their pages don't know how
+// to ask, so when upgrading from one of those this version still takes over immediately.
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE)
-    .then((c) => c.addAll(SHELL.map((p) => new Request(p, { cache: "reload" }))))
-    .then(() => self.skipWaiting()));
+  event.waitUntil((async () => {
+    const c = await caches.open(CACHE);
+    await c.addAll(SHELL.map((p) => new Request(p, { cache: "reload" })));
+    const legacy = (await caches.keys()).some((k) => /^aba-data-v(\d+)$/.test(k) && Number(k.slice(10)) < 15);
+    if (legacy) await self.skipWaiting();
+  })());
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "skip-waiting") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {

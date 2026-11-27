@@ -42,7 +42,7 @@ export async function sessionsFor(clientId) {
 export async function getSettings() {
   return { ...defaultSettings(), ...((await get("settings", "main")) || {}) };
 }
-export const saveSettings = (s) => put("settings", { ...s, id: "main" });
+export const saveSettings = (s) => put("settings", { ...s, id: "main", updatedAt: Date.now() });
 
 export async function saveClient(c) {
   c.updatedAt = Date.now();
@@ -85,6 +85,25 @@ export async function backup() {
   };
 }
 
+// Settings from a backup: the newer record wins. Backups made before settings were dated fill in
+// anything this phone still has at its default (so a new phone gets the old ABC lists, periods and
+// observer name even if a sort button was tapped first). Returns the record to save, or null.
+const SETTING_KEYS = ["observer", "abcA", "abcC", "abcStar", "periods", "sort"];
+export function mergeSettings(mine, theirs) {
+  if (!theirs) return null;
+  if (!mine) return { ...theirs, id: "main" };
+  if ((theirs.updatedAt || 0) > (mine.updatedAt || 0)) return { ...mine, ...theirs, id: "main" };
+  const def = defaultSettings();
+  const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const out = { ...mine };
+  let changed = false;
+  for (const k of SETTING_KEYS) {
+    if (theirs[k] === undefined || same(theirs[k], mine[k])) continue;
+    if (mine[k] === undefined || same(mine[k], def[k])) { out[k] = theirs[k]; changed = true; }
+  }
+  return changed ? out : null;
+}
+
 // Merge a backup into this phone: anything newer on the phone is kept.
 export async function restore(data) {
   if (data?.app !== "aba-data" || !Array.isArray(data.clients) || !Array.isArray(data.sessions)) {
@@ -100,6 +119,10 @@ export async function restore(data) {
       else if ((row.updatedAt || 0) > (mine.updatedAt || 0)) { await put(name, row); updated++; }
     }
   }
-  if (data.settings && !(await get("settings", "main"))) await saveSettings(data.settings);
+  if (data.settings) {
+    const mine = await get("settings", "main");
+    const merged = mergeSettings(mine, data.settings);
+    if (merged) await put("settings", merged);
+  }
   return { added, updated };
 }
