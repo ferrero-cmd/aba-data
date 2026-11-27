@@ -443,9 +443,8 @@ export async function liveSession(root, id, { go, settings, guard }) {
     pauseBtn.replaceChildren(running ? icon.pause() : icon.play(), running ? "Pause" : "Resume");
     tiles.forEach((t) => t.update(ms));
     const u = session.undo.at(-1);
-    undoBar.replaceChildren(u
-      ? h("button", { class: "undo-btn", onclick: undo }, icon.undo(), h("span", {}, "Undo ", h("b", {}, u.label)))
-      : h("span", { class: "muted small" }, "Every tap is saved on this phone"));
+    // The bottom bar only appears when there's something to undo.
+    undoBar.replaceChildren(...(u ? [h("button", { class: "undo-btn", onclick: undo }, icon.undo(), h("span", {}, "Undo ", h("b", {}, u.label)))] : []));
   }
   function tick() {
     const ms = e();
