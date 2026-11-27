@@ -177,7 +177,12 @@ export async function liveSession(root, id, { go, settings, guard }) {
         const controls = h("div", { class: "moment-controls" });
         // Pinned to the card's top-right corner so new marks never change the card's height.
         const missedEl = h("div", { class: "missed-marks", "aria-live": "polite" });
-        const el = T("span2", missedEl, head, h("div", { class: "moment" }, h("div", { class: "ring-wrap small" }, ring.el), prompt), controls);
+        // The answer buttons take the place of the text beside the ring (same height), and the question
+        // replaces the spec line, so the card never grows when an interval needs answering.
+        const many = tr.type === "rating" && (tr.config.ratingMax || 5) > 6;
+        const el = T(`span2 ${many ? "many-controls" : ""}`, missedEl, head,
+          h("div", { class: "moment" }, h("div", { class: "ring-wrap small" }, ring.el), prompt, controls));
+        const specText = spec.textContent;
         let shownFor = -2;
         let shownMissed = -1;
         // Intervals whose answer window has passed without a tap (the pending one isn't missed yet).
@@ -219,7 +224,7 @@ export async function liveSession(root, id, { go, settings, guard }) {
             const prev = [...Object.values(tr.iv || {})].at(-1);
             count = Math.min(n, prev?.engaged ?? n);
             const label = h("div", { class: "stepper-val" });
-            const draw = () => { label.replaceChildren(h("b", {}, count), ` of ${n} engaged`); };
+            const draw = () => { label.replaceChildren(h("b", {}, count), `of ${n}`); };
             draw();
             controls.replaceChildren(h("div", { class: "stepper" },
               h("button", { class: "act step", onclick: () => { count = Math.max(0, count - 1); draw(); }, "aria-label": "One fewer" }, "−"),
@@ -236,14 +241,14 @@ export async function liveSession(root, id, { go, settings, guard }) {
           const idx = pendingIdx(ms);
           drawMissed(info, idx);
           el.classList.toggle("pending", idx != null);
+          const q = tr.type === "mts" ? "Happening right now?" : tr.type === "rating" ? "Rate the interval" : "How many engaged?";
+          const specNow = idx != null ? `${q} · #${idx + 1}` : specText;
+          if (spec.textContent !== specNow) { spec.textContent = specNow; spec.classList.toggle("ask", idx != null); }
           if (info.finished && idx == null) {
             ring.set(1, "✓"); prompt.textContent = `Done · ${info.completed} intervals`; el.classList.add("finished");
           } else {
             ring.set(info.finished ? 1 : 1 - info.remaining / info.L, info.finished ? "✓" : fmtClock(info.remaining + 999));
-            const q = tr.type === "mts" ? "Happening right now?" : tr.type === "rating" ? "Rate the interval" : "How many engaged?";
-            prompt.replaceChildren(idx != null
-              ? h("span", {}, h("b", {}, q), h("span", { class: "muted" }, ` · interval ${idx + 1}`))
-              : h("span", { class: "muted" }, `Next check in ${fmtClock(info.remaining + 999)}`));
+            if (prompt.textContent) prompt.textContent = "";
           }
           if (idx !== shownFor) { shownFor = idx; drawControls(idx); }
         } };
@@ -337,8 +342,8 @@ export async function liveSession(root, id, { go, settings, guard }) {
       row("a", "Antecedent", opts.a),
       rows.b,
       row("c", "Consequence", opts.c),
-      note,
-      h("button", { class: "btn big primary sticky-action", onclick: () => {
+      note), { className: "tall", footer: (close) =>
+      h("button", { class: "btn big primary", onclick: () => {
         commitOther();
         pick.b.delete("Other");
         const bs = behaviors().filter((b) => pick.b.has(b));
@@ -353,7 +358,7 @@ export async function liveSession(root, id, { go, settings, guard }) {
         addEvent(i, { k: "abc", a: parseOption(pick.a).label, b: bs.join(" + "), bs, c: pick.c, note: note.value.trim() }, "ABC");
         close();
         toast("ABC saved");
-      } }, "Save ABC")), { className: "tall" });
+      } }, "Save ABC") });
   }
 
   function dbrSheet(i, after) {
@@ -366,13 +371,13 @@ export async function liveSession(root, id, { go, settings, guard }) {
       return h("div", { class: "dbr-item" }, h("div", { class: "dbr-label" }, h("b", {}, it.label), h("span", { class: "muted small" }, ` · ${it.hint}`)), wrap,
         h("div", { class: "dbr-ends small muted" }, h("span", {}, "0 Never"), h("span", {}, "5 Sometimes"), h("span", {}, "10 Always")));
     });
-    sheet(period() ? `Rate · ${period()}` : "Rate this session", (close) => h("div", {}, ...rows,
-      h("button", { class: "btn big primary sticky-action", onclick: () => {
+    sheet(period() ? `Rate · ${period()}` : "Rate this session", h("div", {}, ...rows), { className: "tall", footer: (close) =>
+      h("button", { class: "btn big primary", onclick: () => {
         if (DBR_ITEMS.some((it) => vals[it.key] == null)) { toast("Rate all three"); return; }
         addEvent(i, { k: "dbr", ...vals }, "DBR");
         close();
         after?.();
-      } }, after ? "Save & end session" : "Save rating")), { className: "tall" });
+      } }, after ? "Save & end session" : "Save rating") });
   }
 
   // ---------- end ----------

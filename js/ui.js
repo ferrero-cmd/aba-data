@@ -154,7 +154,7 @@ export function closeAllSheets() {
   unlockScroll(false);
 }
 
-// sheet(title, body, { onClose }) → { close, el }. Body may be a Node or a function(close) → Node.
+// sheet(title, body, { onClose, footer }) → { close, el }. Body may be a Node or a function(close) → Node.
 export function sheet(title, body, opts = {}) {
   const backdrop = h("div", { class: "sheet-backdrop" });
   const panel = h("div", { class: `sheet ${opts.className || ""}`, role: "dialog", "aria-modal": "true", "aria-label": title });
@@ -174,6 +174,8 @@ export function sheet(title, body, opts = {}) {
       h("h2", {}, title),
       opts.modal || opts.noClose ? null : h("button", { class: "sheet-close", onclick: close, "aria-label": "Close" }, icon.close())),
     h("div", { class: "sheet-body" }, typeof body === "function" ? body(close) : body),
+    // opts.footer: a fixed bar under the scrolling body (e.g. a Save button that never moves).
+    opts.footer ? h("div", { class: "sheet-foot" }, typeof opts.footer === "function" ? opts.footer(close) : opts.footer) : null,
   );
   document.body.append(backdrop, panel);
   lockScroll();

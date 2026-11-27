@@ -54,9 +54,10 @@ const avatar = (c, big = false) =>
   h("div", { class: `avatar ${big ? "big" : ""}`, style: { "--h": hueFor(c.school) } },
     h("span", {}, c.first), h("span", { class: "avatar-school" }, c.school));
 
-const resumeBanner = (s, c) =>
+// On the home list the banner names the client; on that client's own page it doesn't need to.
+const resumeBanner = (s, c, { showClient = true } = {}) =>
   h("button", { class: "resume-banner", onclick: () => go(`#/s/${s.id}`) },
-    h("span", { class: "live-dot" }), h("div", { class: "grow" }, h("b", {}, `Session in progress · ${initials(c)}`),
+    h("span", { class: "live-dot" }), h("div", { class: "grow" }, h("b", {}, showClient ? `Session in progress · ${initials(c)}` : "Session in progress"),
       h("div", { class: "small" }, `${fmtClock(sessionMs(s))} · tap to return`)), icon.chevron());
 
 const ago = (t) => {
@@ -221,7 +222,7 @@ async function clientView(id, tab) {
       h("div", {}, h("h1", {}, initials(client)),
         h("div", { class: "muted" }, [client.label, `${sessions.length} session${sessions.length === 1 ? "" : "s"}`].filter(Boolean).join(" · ")))),
     active
-      ? resumeBanner(active, client)
+      ? resumeBanner(active, client, { showClient: false })
       : h("button", { class: "btn big primary start", onclick: () => {
         if (!client.targets.some((t) => !t.archived)) { toast("Add a target first"); tabs.querySelectorAll("button")[1].click(); targetSheet(client, null, () => route()); return; }
         startSessionSheet(client);
@@ -604,7 +605,7 @@ async function settingsView() {
       h("h2", { class: "card-title" }, "Privacy"),
       h("p", { class: "muted small" }, "Clients are identified by initials only. Nothing is sent anywhere — no accounts, no servers, no analytics. Data leaves the phone only when you email an Excel file or save a backup."),
     ),
-    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.8.2"))));
+    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.8.4"))));
 }
 
 // ======================================================================

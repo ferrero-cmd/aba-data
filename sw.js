@@ -1,6 +1,6 @@
 // Keeps the whole app on the phone so it opens and works with no signal.
 // Bump VERSION whenever any file changes; the app then shows "Update available".
-const VERSION = "v11";
+const VERSION = "v13";
 const CACHE = `aba-data-${VERSION}`;
 const SHELL = [
   "./", "index.html", "styles.css", "manifest.webmanifest",

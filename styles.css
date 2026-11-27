@@ -297,7 +297,10 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 .sheet-head h2 { flex: 1; margin: 0; font-size: 21px; }
 .sheet-close { border: 0; background: var(--line); color: var(--muted); width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; padding: 0; }
 .sheet-close svg { width: 18px; height: 18px; fill: currentColor; }
-.sheet-body { overflow-y: auto; padding: 4px 16px calc(env(safe-area-inset-bottom) + 24px); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+.sheet-foot { flex: none; padding: 10px 16px calc(env(safe-area-inset-bottom) + 12px); border-top: 1px solid var(--line); background: var(--bg); }
+.sheet-foot > .btn { width: 100%; }
+.sheet-body:has(+ .sheet-foot) { padding-bottom: 16px; }
+.sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 16px calc(env(safe-area-inset-bottom) + 24px); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 
 /* ---------- live session ---------- */
 .view.live { padding-top: 0; padding-bottom: calc(env(safe-area-inset-bottom) + 86px); }
@@ -332,7 +335,7 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 .tile-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 8px; }
 .tile-head > .grow { flex: 1 1 110px; }
 .tile-name { font-weight: 750; font-size: 17px; line-height: 1.2; overflow-wrap: break-word; hyphens: auto; }
-.tile-spec { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; }
+.tile-spec { line-height: 16px; font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; }
 .tile-stat { font-size: 14px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tile-big { font-size: 64px; font-weight: 750; line-height: 1; font-variant-numeric: tabular-nums; margin-top: auto; letter-spacing: -.03em; }
 .tile-big.mono { font-size: 46px; font-weight: 600; }
@@ -373,12 +376,21 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 .tile.marked .tile-state { color: var(--t-mts); }
 .moment { display: flex; align-items: center; gap: 14px; }
 .tile-prompt { font-size: 17px; }
-.moment-controls { display: flex; gap: 8px; }
-.moment-controls > .act { flex: 1; }
+/* Answer buttons sit beside the ring at the ring's height, so the card stays the same size. */
+.moment { min-height: 58px; }
+.moment-controls { display: flex; gap: 8px; flex: 1; min-width: 0; height: 58px; }
+.moment-controls > .act, .moment-controls .act { min-height: 0; height: 58px; flex: 1; padding: 0; }
+.moment-controls .act.num { font-size: 20px; }
 .moment-controls:empty { display: none; }
-.stepper { display: flex; align-items: center; gap: 8px; flex: 2; }
-.stepper-val { flex: 1; text-align: center; font-size: 15px; }
-.stepper-val b { font-size: 30px; display: block; line-height: 1; }
+.tile-prompt:empty { display: none; }
+.tile-spec.ask { text-transform: none; letter-spacing: 0; font-size: 13.5px; font-weight: 750; color: var(--accent); }
+/* Ratings above 6 need the whole row: the ring steps aside while they're showing. */
+.tile.many-controls.pending .ring-wrap { display: none; }
+.moment-controls .act.num { min-width: 0; }
+.stepper { display: flex; align-items: center; gap: 6px; flex: 2; min-width: 0; }
+.moment-controls .act.step { flex: 0 0 48px; width: 48px; font-size: 26px; }
+.stepper-val { flex: 1; text-align: center; font-size: 13px; line-height: 1.1; min-width: 0; }
+.stepper-val b { font-size: 26px; display: block; line-height: 1; }
 
 .undo-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; justify-content: center; align-items: center;
@@ -533,7 +545,7 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
   pointer-events: none; z-index: 1;
 }
 /* The % moves down to the spec line so the title line is free for the marks. */
-.tile.t-mts .tile-stat, .tile.t-placheck .tile-stat, .tile.t-rating .tile-stat { margin-top: 21px; }
+.tile.t-mts .tile-stat, .tile.t-placheck .tile-stat, .tile.t-rating .tile-stat { position: absolute; top: 36px; right: 14px; line-height: 16px; }
 .missed-marks:empty { display: none; }
 .missed-marks .miss { position: relative; width: 7px; height: 7px; display: inline-block; }
 .missed-marks .miss::before, .missed-marks .miss::after {
