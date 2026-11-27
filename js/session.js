@@ -1,6 +1,5 @@
 // Live data collection (one big tile per target) and the finished-session summary.
 import * as db from "./db.js";
-import { emailSessions, buildWorkbook, preloadExcel } from "./export.js";
 import { abcBehaviors, abcOptions, activeMs, DBR_ITEMS, initials, isRunning, INTERVAL_TYPES, parseOption, targetSpec, TYPES } from "./model.js";
 import { durationOpen, fmtClock, fmtDate, fmtTime, intervalInfo, latencyOpen, periodAt, sessionMs, summarize } from "./summary.js";
 import { celebrate, confirmSheet, flash, h, icon, sheet, toast } from "./ui.js";
@@ -188,9 +187,13 @@ export async function liveSession(root, id, { go, settings, guard }) {
           for (let k = 0; k < upto; k++) if (tr.iv?.[k] == null) n++;
           if (n === shownMissed) return;
           shownMissed = n;
-          const MAX = 8;
-          missedEl.replaceChildren(...Array.from({ length: Math.min(n, MAX) }, () => h("i", { class: "miss" })),
-            n > MAX ? h("span", { class: "miss-more" }, `+${n - MAX}`) : null);
+          // Up to 10 single marks; past that, one mark and the total ("✕ 12") so the row never gets long.
+          const MAX = 10;
+          missedEl.replaceChildren(...(n > MAX
+            ? [h("i", { class: "miss" }), h("span", { class: "miss-count" }, n)]
+            : Array.from({ length: n }, () => h("i", { class: "miss" }))));
+          // Keep a long target name from running underneath the marks.
+          name.style.paddingRight = n ? `${missedEl.offsetWidth + 8}px` : "";
           missedEl.title = n ? `${n} interval${n === 1 ? "" : "s"} missed (not scored)` : "";
           missedEl.setAttribute("aria-label", missedEl.title);
         };
@@ -467,17 +470,9 @@ export async function liveSession(root, id, { go, settings, guard }) {
   document.addEventListener("visibilitychange", onVis);
   wake();
 
-  // iOS starts its swipe-back gesture from touches at the very left edge, and only tells the page
-  // after the slide has happened. Cancelling those touches stops the gesture before it begins
-  // (the 16px edge is page gutter, so no buttons live there). The leave guard stays as a fallback.
-  const EDGE = 16;
-  const onEdge = (ev) => { if (ev.touches.length === 1 && ev.touches[0].clientX < EDGE) ev.preventDefault(); };
-  document.addEventListener("touchstart", onEdge, { passive: false });
-
   return () => {
     clearInterval(timer);
     document.removeEventListener("visibilitychange", onVis);
-    document.removeEventListener("touchstart", onEdge);
     lock?.release?.().catch(() => {});
   };
 }
@@ -507,27 +502,12 @@ export async function sessionSummary(root, id, { go }) {
   const e = sessionMs(session);
   const allSessions = await db.sessionsFor(client.id);
 
-  let prepared = null;
-  const prepare = () => { prepared = buildWorkbook(client, [session], allSessions).catch(() => null); };
-  preloadExcel().then(prepare);
-
   const notes = h("textarea", { class: "input", rows: 3, placeholder: "Session notes (setting, staff, anything unusual)…", value: session.notes || "" });
   let t;
   notes.addEventListener("input", () => {
     clearTimeout(t);
-    t = setTimeout(async () => { session.notes = notes.value; await db.saveSession(session); prepare(); }, 500);
+    t = setTimeout(async () => { session.notes = notes.value; await db.saveSession(session); }, 500);
   });
-
-  const emailBtn = h("button", { class: "btn big primary", onclick: async () => {
-    emailBtn.disabled = true;
-    try {
-      if (notes.value !== (session.notes || "")) { session.notes = notes.value; await db.saveSession(session); prepare(); }
-      const file = await prepared;
-      const result = await emailSessions(client, [session], file || undefined, allSessions);
-      if (result === "shared" || result === "downloaded") { session.exportedAt = Date.now(); await db.saveSession(session); }
-    } catch (err) { toast(err.message || "Couldn't make the Excel file"); }
-    emailBtn.disabled = false;
-  } }, icon.mail(), "Email Excel");
 
   const periods = [...new Set((session.periodLog || []).map((p) => p.name).filter(Boolean))];
   root.append(h("main", { class: "view" },
@@ -537,8 +517,7 @@ export async function sessionSummary(root, id, { go }) {
       h("div", { class: "eyebrow" }, fmtDate(session.startedAt)),
       h("h1", {}, `${hm(session.startedAt)} – ${hm(session.endedAt)}`),
       h("div", { class: "muted" }, `${fmtClock(e)} observed${periods.length ? ` · ${periods.join(", ")}` : ""}`)),
-    h("div", { class: "actions" }, emailBtn,
-      session.exportedAt ? h("div", { class: "muted small center" }, `Last exported ${fmtDate(session.exportedAt)} ${fmtTime(session.exportedAt)}`) : null),
+    h("section", { class: "card" }, h("div", { class: "field-label" }, "Notes"), notes),
     ...session.trackers.map((tr) => {
       const s = summarize(tr, session, e);
       return h("section", { class: "card result" },
@@ -547,7 +526,6 @@ export async function sessionSummary(root, id, { go }) {
           h("div", { class: "result-headline" }, s.headline)),
         h("dl", { class: "kv" }, ...s.details.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, String(v))])));
     }),
-    h("section", { class: "card" }, h("div", { class: "field-label" }, "Notes"), notes),
     h("button", { class: "link-btn danger", onclick: async () => {
       if (await confirmSheet("Delete this session?", "Its data will be removed from this phone. This can't be undone.", "Delete session", { danger: true })) {
         await db.del("sessions", session.id);

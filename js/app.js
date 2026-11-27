@@ -604,7 +604,7 @@ async function settingsView() {
       h("h2", { class: "card-title" }, "Privacy"),
       h("p", { class: "muted small" }, "Clients are identified by initials only. Nothing is sent anywhere — no accounts, no servers, no analytics. Data leaves the phone only when you email an Excel file or save a backup."),
     ),
-    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.8"))));
+    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.8.2"))));
 }
 
 // ======================================================================
@@ -630,6 +630,12 @@ async function boot() {
   blockZoom();
   settings = await db.getSettings();
   db.persist();
+  // No swipe-back anywhere: iOS starts that gesture from touches at the very left edge and only tells
+  // the page after the slide has happened, so those touches are cancelled before it begins. The 16px
+  // edge is page gutter, so no buttons live there. (Back arrows in the app still work.)
+  document.addEventListener("touchstart", (ev) => {
+    if (ev.touches.length === 1 && ev.touches[0].clientX < 16) ev.preventDefault();
+  }, { passive: false });
   window.addEventListener("hashchange", route);
   await route();
   // Offline cache everywhere except local development (add ?sw to test it locally).

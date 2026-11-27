@@ -527,11 +527,13 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 .tile:not(.span2) .tile-state { font-size: 14px; }
 
 /* Missed (unscored) intervals on MTS / PLACHECK / rating tiles: tiny red x marks that pile up. */
+/* Sits on the title's line, at the card's right padding; absolute so it never adds height. */
 .missed-marks {
-  position: absolute; top: 5px; right: 12px; display: flex; flex-wrap: nowrap; align-items: center; gap: 3px;
+  position: absolute; top: 14px; right: 14px; height: 20px; display: flex; flex-wrap: nowrap; align-items: center; gap: 3px;
   pointer-events: none; z-index: 1;
 }
-.tile.t-mts .tile-stat, .tile.t-placheck .tile-stat, .tile.t-rating .tile-stat { margin-top: 8px; }
+/* The % moves down to the spec line so the title line is free for the marks. */
+.tile.t-mts .tile-stat, .tile.t-placheck .tile-stat, .tile.t-rating .tile-stat { margin-top: 21px; }
 .missed-marks:empty { display: none; }
 .missed-marks .miss { position: relative; width: 7px; height: 7px; display: inline-block; }
 .missed-marks .miss::before, .missed-marks .miss::after {
@@ -539,7 +541,7 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 }
 .missed-marks .miss::before { transform: translate(-50%, -50%) rotate(45deg); }
 .missed-marks .miss::after { transform: translate(-50%, -50%) rotate(-45deg); }
-.missed-marks .miss-more { font-size: 10px; font-weight: 700; color: var(--no); line-height: 1; }
+.missed-marks .miss-count { font-size: 12px; font-weight: 750; color: var(--no); line-height: 1; font-variant-numeric: tabular-nums; }
 
 /* Reorderable list editor (ABC options, periods) */
 .list-editor { display: grid; gap: 10px; }
