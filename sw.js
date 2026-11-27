@@ -1,11 +1,11 @@
 // Keeps the whole app on the phone so it opens and works with no signal.
 // Bump VERSION whenever any file changes; the app then shows "Update available".
-const VERSION = "v7";
+const VERSION = "v8";
 const CACHE = `aba-data-${VERSION}`;
 const SHELL = [
   "./", "index.html", "styles.css", "manifest.webmanifest",
-  "js/app.js", "js/db.js", "js/model.js", "js/summary.js", "js/ui.js", "js/session.js", "js/export.js", "js/graphs.js",
-  "vendor/exceljs.min.js",
+  "js/app.js", "js/db.js", "js/model.js", "js/summary.js", "js/ui.js", "js/session.js", "js/export.js", "js/graphs.js", "js/xlsxcharts.js",
+  "vendor/exceljs.min.js", "vendor/jszip.min.js",
   "icons/icon-192.png", "icons/apple-touch-icon.png",
 ];
 

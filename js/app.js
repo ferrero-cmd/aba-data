@@ -1,9 +1,9 @@
 // ABA Data — router and the client / target / settings screens.
 import * as db from "./db.js";
-import { CONFIG_FIELDS, initials, INTERVAL_TYPES, newClient, newTarget, targetSpec, TYPES, uid } from "./model.js";
+import { abcLists, CONFIG_FIELDS, initials, INTERVAL_TYPES, newClient, newTarget, parseOption, targetSpec, TYPES, uid, usageCounts } from "./model.js";
 import { liveSession, sessionSummary } from "./session.js";
 import { fmtDate, fmtTime, sessionMs, summarize, fmtClock } from "./summary.js";
-import { $, closeAllSheets, confirmSheet, download, field, h, hueFor, icon, segmented, sheet, shareFile, toast } from "./ui.js";
+import { $, closeAllSheets, confirmSheet, download, field, h, hueFor, icon, listEditor, segmented, sheet, shareFile, toast } from "./ui.js";
 
 const root = $("#app");
 let cleanup = null;
@@ -234,6 +234,14 @@ async function clientView(id, tab) {
 function clientMenu(client) {
   sheet(initials(client), (close) => h("div", { class: "stack" },
     h("button", { class: "btn big", onclick: () => { close(); setTimeout(() => addClientSheet(client), 280); } }, "Edit initials / note"),
+    h("button", { class: "btn big", onclick: () => { close(); setTimeout(() => clientAbcSheet(client), 280); } },
+      client.abc ? "ABC options (custom for this client)" : "ABC options for this client"),
+    h("label", { class: "toggle big-toggle" },
+      h("input", { type: "checkbox", checked: !!client.periods, onchange: async (ev) => {
+        client.periods = ev.target.checked; await db.saveClient(client);
+        toast(client.periods ? "Period tracking on for this client" : "Period tracking off");
+      } }),
+      h("span", { class: "grow" }, h("b", {}, "Track periods / activities"), h("div", { class: "muted small" }, "Shows a row of period buttons during sessions, for the scatterplot."))),
     h("button", { class: "btn big", onclick: async () => {
       client.archived = !client.archived; await db.saveClient(client); close(); toast(client.archived ? "Archived" : "Restored"); route();
     } }, client.archived ? "Unarchive client" : "Archive client (hide from list)"),
@@ -246,6 +254,47 @@ function clientMenu(client) {
     } }, "Delete client…")));
 }
 
+// Per-client ABC lists. Off = use the default lists from Settings.
+async function clientAbcSheet(client) {
+  const sessions = await db.sessionsFor(client.id);
+  const body = h("div", { class: "stack" });
+  const draw = () => {
+    const custom = !!client.abc;
+    const editor = (key) => {
+      const L = abcLists(settings, client);
+      return listEditor({
+        items: L[key], starred: L.star[key], labelOf: (x) => parseOption(x).label,
+        placeholder: key === "a" ? "Add an antecedent" : "Add a consequence",
+        counts: () => usageCounts(sessions, key),
+        onChange: async (items, starred) => {
+          client.abc[key] = items;
+          client.abc.star[key] = starred;
+          await db.saveClient(client);
+        },
+      });
+    };
+    body.replaceChildren(
+      h("label", { class: "toggle big-toggle" },
+        h("input", { type: "checkbox", checked: custom, onchange: async (ev) => {
+          if (ev.target.checked) {
+            const L = abcLists(settings, null);
+            client.abc = { a: [...L.a], c: [...L.c], star: { a: [...L.star.a], c: [...L.star.c] } };
+          } else {
+            if (!(await confirmSheet("Use the default lists?", "This client's custom order and options will be removed. Past data isn't changed.", "Use defaults"))) { ev.target.checked = true; return; }
+            client.abc = null;
+          }
+          await db.saveClient(client);
+          draw();
+        } }),
+        h("span", { class: "grow" }, h("b", {}, "Custom lists for this client"),
+          h("div", { class: "muted small" }, custom ? "Changes here only affect this client." : "Off: uses the default lists from Settings."))),
+      custom ? [h("div", { class: "field-label" }, "Antecedents"), editor("a"), h("div", { class: "field-label" }, "Consequences"), editor("c"),
+        h("p", { class: "field-hint" }, "Drag ⋮⋮ to reorder, ★ keeps an option at the top. “Sort by most used” uses this client's ABC data.")] : null);
+  };
+  draw();
+  sheet(`ABC options · ${initials(client)}`, body, { className: "tall" });
+}
+
 function sessionsTab(client, sessions) {
   if (!sessions.length) {
     return h("div", { class: "empty-state small" }, h("p", { class: "muted" },
@@ -253,7 +302,10 @@ function sessionsTab(client, sessions) {
     client.targets.some((t) => !t.archived) ? null : h("button", { class: "btn", onclick: () => go(`#/c/${client.id}/targets`) }, "Add targets"));
   }
   let month = "";
-  return h("div", {}, ...sessions.flatMap((s) => {
+  const finished = sessions.filter((s) => s.status === "done");
+  return h("div", {},
+    finished.length ? h("button", { class: "btn select-email", onclick: () => multiEmailSheet(client, sessions) }, icon.mail(), "Select & email sessions…") : null,
+    ...sessions.flatMap((s) => {
     const m = new Date(s.startedAt).toLocaleDateString([], { month: "long", year: "numeric" });
     const head = m !== month ? h("div", { class: "group-title" }, (month = m)) : null;
     return [head, h("button", { class: "session-row card", onclick: () => go(s.status === "active" ? `#/s/${s.id}` : `#/r/${s.id}`) },
@@ -268,6 +320,61 @@ function sessionsTab(client, sessions) {
           s.trackers.length > 4 ? h("div", { class: "small muted" }, `+${s.trackers.length - 4} more`) : null)),
       icon.chevron())];
   }));
+}
+
+// Pick several finished sessions and email them as one Excel file. Unsent first (newest first);
+// already-sent ones sit at the bottom, greyed with their Sent badge, and can still be included.
+function multiEmailSheet(client, sessions) {
+  const done = sessions.filter((s) => s.status === "done").sort((a, b) => b.startedAt - a.startedAt);
+  const unsent = done.filter((s) => !s.exportedAt);
+  const sent = done.filter((s) => s.exportedAt);
+  const picked = new Set(unsent.map((s) => s.id));
+  const sendBtn = h("button", { class: "btn big primary sticky-action" });
+  const drawBtn = () => {
+    sendBtn.replaceChildren(icon.mail(), picked.size ? `Email ${picked.size} session${picked.size === 1 ? "" : "s"}` : "Pick sessions to email");
+    sendBtn.disabled = !picked.size;
+  };
+  const row = (s) => {
+    const lines = s.trackers.slice(0, 3).map((tr) => `${tr.name}: ${summarize(tr, s).headline}`).join(" · ");
+    return h("label", { class: `check-row ${s.exportedAt ? "sent" : ""}` },
+      h("input", { type: "checkbox", checked: picked.has(s.id), onchange: (ev) => { ev.target.checked ? picked.add(s.id) : picked.delete(s.id); drawBtn(); } }),
+      h("div", { class: "grow" },
+        h("div", { class: "target-name" }, `${fmtDate(s.startedAt)} · ${fmtTime(s.startedAt).replace(/:\d\d(?=\s|$)/, "")}`,
+          s.exportedAt ? h("span", { class: "badge ok" }, "Sent") : null),
+        h("div", { class: "muted small" }, `${fmtClock(sessionMs(s))}${lines ? ` · ${lines}` : ""}`)));
+  };
+  const setAll = (on) => {
+    for (const s of done) on ? picked.add(s.id) : picked.delete(s.id);
+    panel.el.querySelectorAll(".check-row input").forEach((c) => { c.checked = on; });
+    drawBtn();
+  };
+  sendBtn.addEventListener("click", async () => {
+    const chosen = done.filter((s) => picked.has(s.id));
+    if (!chosen.length) return;
+    sendBtn.disabled = true;
+    try {
+      const { emailSessions } = await import("./export.js");
+      const result = await emailSessions(client, chosen, undefined, sessions);
+      if (result === "shared" || result === "downloaded") {
+        const now = Date.now();
+        for (const s of chosen) { s.exportedAt = now; await db.saveSession(s); }
+        panel.close();
+        route();
+        return;
+      }
+    } catch (err) { toast(err.message || "Couldn't make the Excel file"); }
+    drawBtn();
+  });
+  drawBtn();
+  import("./export.js").then((m) => m.preloadExcel());
+  const panel = sheet("Email sessions", h("div", { class: "stack" },
+    h("p", { class: "muted small" }, "Ticked sessions go into one Excel file, with graphs of every session to date."),
+    h("div", { class: "row-btns" },
+      h("button", { class: "btn small", type: "button", onclick: () => setAll(true) }, "Select all"),
+      h("button", { class: "btn small ghost", type: "button", onclick: () => setAll(false) }, "Clear")),
+    unsent.length ? h("div", { class: "list-card" }, ...unsent.map(row)) : h("p", { class: "muted small" }, "Every session has been sent already."),
+    sent.length ? [h("div", { class: "group-title tight" }, "Already sent"), h("div", { class: "list-card" }, ...sent.map(row))] : null,
+    sendBtn), { className: "tall" });
 }
 
 // ---------- targets ----------
@@ -292,18 +399,27 @@ function targetsTab(client) {
   return wrap;
 }
 
+// New target: step 1 picks the data type from the cards, step 2 names it and sets that type's options.
+// Editing opens straight on step 2 with the type locked.
 export function targetSheet(client, target, onSaved) {
   const editing = !!target;
   let type = target?.type || null;
   const name = h("input", { class: "input", placeholder: "e.g. Elopement, On-task, Hand raising", maxlength: 60, value: target?.name || "" });
   const def = h("textarea", { class: "input", rows: 2, placeholder: "Operational definition (optional, goes in the Excel file)", value: target?.definition || "" });
+  const behaviors = h("input", { class: "input", placeholder: "e.g. Elopement, Aggression, Property destruction", maxlength: 300,
+    value: (target?.config?.behaviors || []).join(", ") });
   const cfgBox = h("div", {});
-  const typeBox = h("div", {});
+  const body = h("div", { class: "stack" });
   const cfg = { ...(target?.config || {}) };
+  let panel;
 
   const drawCfg = () => {
     cfgBox.replaceChildren();
     if (!type) return;
+    if (type === "abc") {
+      cfgBox.append(field("Behaviors", behaviors, "Separate with commas. Each one becomes a button when you log an ABC, and you can pick more than one if they happen together. Leave empty to use the target name."));
+      return;
+    }
     const fields = TYPES[type].config;
     if (!fields.length) return;
     for (const [k, v] of Object.entries(TYPES[type].defaults || {})) cfg[k] ??= v;
@@ -315,58 +431,68 @@ export function targetSheet(client, target, onSaved) {
     })));
     if (INTERVAL_TYPES.has(type)) {
       cfgBox.append(h("div", { class: "chips wrap presets" }, h("span", { class: "muted small" }, "Quick:"),
-        ...[10, 15, 30, 60, 300].map((s) => h("button", { class: "chip", type: "button", onclick: () => { cfg.intervalSec = s; drawCfg(); } }, s >= 60 ? `${s / 60} min` : `${s} s`))));
+        ...[10, 15, 30, 60, 300].map((sec) => h("button", { class: "chip", type: "button", onclick: () => { cfg.intervalSec = sec; drawCfg(); } }, sec >= 60 ? `${sec / 60} min` : `${sec} s`))));
     }
   };
 
-  const drawTypes = () => {
-    if (editing) {
-      typeBox.replaceChildren(h("div", { class: "type-locked" }, h("span", { class: `type-dot t-${type}` }), h("b", {}, TYPES[type].label),
-        h("div", { class: "muted small" }, TYPES[type].blurb)));
-      return;
-    }
+  const setTitle = (t) => { const el = panel?.el.querySelector(".sheet-head h2"); if (el) el.textContent = t; };
+
+  const drawPick = () => {
+    setTitle("New target · data type");
     const groups = [...new Set(Object.values(TYPES).map((t) => t.group))];
-    typeBox.replaceChildren(...groups.map((g) => h("div", {},
-      h("div", { class: "group-title tight" }, g),
-      h("div", { class: "type-grid" }, ...Object.entries(TYPES).filter(([, t]) => t.group === g).map(([k, t]) =>
-        h("button", { class: `type-card ${type === k ? "on" : ""}`, type: "button", onclick: () => { type = k; drawTypes(); drawCfg(); } },
-          h("div", { class: "type-card-title" }, h("span", { class: `type-dot t-${k}` }), t.label),
-          h("div", { class: "type-card-blurb" }, t.blurb)))))));
+    body.replaceChildren(h("p", { class: "muted small" }, "What kind of data will you take?"),
+      ...groups.map((g) => h("div", {},
+        h("div", { class: "group-title tight" }, g),
+        h("div", { class: "type-grid" }, ...Object.entries(TYPES).filter(([, t]) => t.group === g).map(([k, t]) =>
+          h("button", { class: `type-card ${type === k ? "on" : ""}`, type: "button", onclick: () => { type = k; drawDetails(); } },
+            h("div", { class: "type-card-title" }, h("span", { class: `type-dot t-${k}` }), t.label),
+            h("div", { class: "type-card-blurb" }, t.blurb)))))));
+    panel?.el.querySelector(".sheet-body")?.scrollTo(0, 0);
   };
-  drawTypes();
-  drawCfg();
 
-  sheet(editing ? "Edit target" : "New target", (close) => h("div", { class: "stack" },
-    field("Name", name),
-    h("div", { class: "field-label" }, "Data type"),
-    typeBox,
-    cfgBox,
-    field("Definition", def),
-    h("button", { class: "btn big primary sticky-action", onclick: async () => {
-      if (!name.value.trim()) { toast("Give the target a name"); name.focus(); return; }
-      if (!type) { toast("Pick a data type"); return; }
-      if (editing) Object.assign(target, { name: name.value.trim(), definition: def.value.trim(), config: { ...cfg } });
-      else client.targets.push(newTarget(name.value, type, cfg, def.value));
-      await db.saveClient(client);
-      close();
-      onSaved?.(editing ? target : client.targets.at(-1));
-    } }, editing ? "Save changes" : "Add target"),
-    editing ? h("button", { class: "btn big ghost", onclick: async () => {
-      target.archived = !target.archived;
-      await db.saveClient(client);
-      close();
-      onSaved?.();
-      toast(target.archived ? "Archived — past data and graphs are kept" : "Restored");
-    } }, target.archived ? "Restore target" : "Archive target") : null,
-    editing ? h("p", { class: "muted small center" }, "Changes apply to future sessions. Data type can't be changed once created.") : null,
-  ), { className: "tall" });
-  if (!editing) setTimeout(() => name.focus(), 300);
+  const save = async () => {
+    if (!name.value.trim()) { toast("Give the target a name"); name.focus(); return; }
+    const out = { ...cfg };
+    if (type === "abc") out.behaviors = [...new Set(behaviors.value.split(",").map((b) => b.trim()).filter(Boolean))];
+    if (editing) Object.assign(target, { name: name.value.trim(), definition: def.value.trim(), config: out });
+    else client.targets.push(newTarget(name.value, type, out, def.value));
+    await db.saveClient(client);
+    panel.close();
+    onSaved?.(editing ? target : client.targets.at(-1));
+  };
+
+  const drawDetails = () => {
+    setTitle(editing ? "Edit target" : `New ${TYPES[type].label} target`);
+    drawCfg();
+    body.replaceChildren(
+      h("div", { class: "type-locked" }, h("span", { class: `type-dot t-${type}` }), h("b", {}, TYPES[type].label),
+        editing ? null : h("button", { class: "link-btn inline", type: "button", onclick: drawPick }, "Change"),
+        h("div", { class: "muted small" }, TYPES[type].blurb)),
+      field("Name", name),
+      cfgBox,
+      field("Definition", def),
+      h("button", { class: "btn big primary sticky-action", onclick: save }, editing ? "Save changes" : "Add target"),
+      editing ? h("button", { class: "btn big ghost", onclick: async () => {
+        target.archived = !target.archived;
+        await db.saveClient(client);
+        panel.close();
+        onSaved?.();
+        toast(target.archived ? "Archived — past data and graphs are kept" : "Restored");
+      } }, target.archived ? "Restore target" : "Archive target") : null,
+      editing ? h("p", { class: "muted small center" }, "Changes apply to future sessions. Data type can't be changed once created.") : null);
+    panel?.el.querySelector(".sheet-body")?.scrollTo(0, 0);
+    if (!editing) setTimeout(() => name.focus(), 50);
+  };
+
+  panel = sheet(editing ? "Edit target" : "New target · data type", body, { className: "tall" });
+  if (editing) drawDetails(); else drawPick();
 }
 
 // ---------- start a session ----------
 function startSessionSheet(client) {
   const live = client.targets.filter((t) => !t.archived);
   const picked = new Set(live.map((t) => t.id));
+  let periodName = null;
   const list = h("div", {});
   const drawList = () => {
     const targets = client.targets.filter((t) => !t.archived);
@@ -379,9 +505,15 @@ function startSessionSheet(client) {
       h("button", { class: "btn dashed", type: "button", onclick: () => targetSheet(client, null, (t) => { if (t) picked.add(t.id); drawList(); }) }, icon.plus(), "New target"));
   };
   drawList();
+  const periods = h("div", { class: "chips wrap" });
+  const drawPeriods = () => periods.replaceChildren(...(settings.periods || []).map((p) =>
+    h("button", { class: `chip ${periodName === p ? "on" : ""}`, type: "button", onclick: () => { periodName = periodName === p ? null : p; drawPeriods(); } }, p)));
+  if (client.periods) drawPeriods();
+
   sheet(`Start · ${initials(client)}`, (close) => h("div", { class: "stack" },
     h("div", { class: "field-label" }, "Collect data on"),
     list,
+    client.periods ? [h("div", { class: "field-label" }, "Period / activity ", h("span", { class: "muted small" }, "(optional — switch any time during the session)")), periods] : null,
     h("button", { class: "btn big primary sticky-action", onclick: async () => {
       const chosen = client.targets.filter((t) => !t.archived && picked.has(t.id));
       if (!chosen.length) { toast("Pick at least one target"); return; }
@@ -390,6 +522,7 @@ function startSessionSheet(client) {
         id: uid(), clientId: client.id, status: "active", startedAt: now, endedAt: null,
         observer: settings.observer || "", notes: "",
         segments: [{ s: now }],
+        periodLog: periodName ? [{ e: 0, t: now, name: periodName }] : [],
         trackers: chosen.map((t) => ({ targetId: t.id, name: t.name, type: t.type, config: { ...t.config }, definition: t.definition || "", events: [], iv: {} })),
         undo: [],
       };
@@ -404,16 +537,26 @@ function startSessionSheet(client) {
 // ======================================================================
 async function settingsView() {
   const info = await db.storageInfo();
-  const lines = (arr) => arr.join("\n");
-  const fromLines = (s) => s.split("\n").map((x) => x.trim()).filter(Boolean);
   const observer = h("input", { class: "input", value: settings.observer || "", autocomplete: "off" });
-  const abcA = h("textarea", { class: "input", rows: 6, value: lines(settings.abcA) });
-  const abcC = h("textarea", { class: "input", rows: 6, value: lines(settings.abcC) });
-  const save = async () => {
-    Object.assign(settings, { observer: observer.value.trim(), abcA: fromLines(abcA.value), abcC: fromLines(abcC.value) });
-    await db.saveSettings(settings);
-  };
-  for (const el of [observer, abcA, abcC]) el.addEventListener("change", () => save().then(() => toast("Saved")));
+  observer.addEventListener("change", async () => { settings.observer = observer.value.trim(); await db.saveSettings(settings); toast("Saved"); });
+  const allSessions = await db.getAll("sessions");
+  settings.abcStar ??= { a: [], c: [] };
+  const abcEditor = (key) => listEditor({
+    items: key === "a" ? settings.abcA : settings.abcC,
+    starred: settings.abcStar[key],
+    labelOf: (x) => parseOption(x).label,
+    placeholder: key === "a" ? "Add an antecedent" : "Add a consequence",
+    counts: () => usageCounts(allSessions, key),
+    onChange: async (items, starred) => {
+      settings[key === "a" ? "abcA" : "abcC"] = items;
+      settings.abcStar[key] = starred;
+      await db.saveSettings(settings);
+    },
+  });
+  const periodsEditor = listEditor({
+    items: settings.periods || [], starrable: false, placeholder: "Add a period or activity",
+    onChange: async (items) => { settings.periods = items; await db.saveSettings(settings); },
+  });
 
   const fileInput = h("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: async (ev) => {
     const f = ev.target.files?.[0];
@@ -433,8 +576,15 @@ async function settingsView() {
     ),
     h("section", { class: "card stack" },
       h("h2", { class: "card-title" }, "ABC options"),
-      field("Antecedents", abcA, "One per line."),
-      field("Consequences", abcC, "One per line. Add “= escape”, “= attention”, “= tangible” or “= automatic” to feed the function hint on the graphs."),
+      h("p", { class: "muted small" }, "The default lists for every client (a client can have its own from its ✎ menu). Drag ⋮⋮ to reorder, ★ keeps an option at the top, tap one to edit it."),
+      h("div", { class: "field-label" }, "Antecedents"), abcEditor("a"),
+      h("div", { class: "field-label" }, "Consequences"), abcEditor("c"),
+      h("p", { class: "field-hint" }, "Add “= escape”, “= attention”, “= tangible” or “= automatic” to a consequence to feed the function hint on the graphs."),
+    ),
+    h("section", { class: "card stack" },
+      h("h2", { class: "card-title" }, "Periods / activities"),
+      h("p", { class: "muted small" }, "Used by clients with period tracking turned on (✎ menu on the client). Tap a period during a session to tag the data that follows."),
+      periodsEditor,
     ),
     h("section", { class: "card stack" },
       h("h2", { class: "card-title" }, "Backup"),
@@ -454,7 +604,7 @@ async function settingsView() {
       h("h2", { class: "card-title" }, "Privacy"),
       h("p", { class: "muted small" }, "Clients are identified by initials only. Nothing is sent anywhere — no accounts, no servers, no analytics. Data leaves the phone only when you email an Excel file or save a backup."),
     ),
-    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.6"))));
+    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.7"))));
 }
 
 // ======================================================================

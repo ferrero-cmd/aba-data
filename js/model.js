@@ -126,13 +126,64 @@ export function parseOption(line) {
   return { label, fn: fn ? fn.toLowerCase() : null };
 }
 
+export const DEFAULT_PERIODS = [
+  "Arrival", "Morning meeting", "Math", "ELA", "Science", "Social studies", "Specials", "Lunch", "Recess",
+  "Transition", "Small group", "Independent work", "Dismissal",
+];
+
 export const defaultSettings = () => ({
   id: "main",
   observer: "",
   abcA: [...DEFAULT_ABC.a],
   abcC: [...DEFAULT_ABC.c],
+  abcStar: { a: [], c: [] },
+  periods: [...DEFAULT_PERIODS],
   sort: "school",
 });
+
+// ---------- ABC options ----------
+// The behaviors an ABC target offers: its "behaviors" list, or just its own name.
+export function abcBehaviors(tr) {
+  const list = (tr.config?.behaviors || []).map((b) => String(b).trim()).filter(Boolean);
+  return list.length ? [...new Set(list)] : [tr.name];
+}
+// Behaviors recorded on one ABC event (older events only have the joined string).
+export const eventBehaviors = (ev) => (Array.isArray(ev.bs) ? ev.bs : ev.b ? [ev.b] : []);
+
+// Starred options first (keeping list order), then the rest in list order.
+export function orderOptions(list, starred = []) {
+  const star = new Set(starred);
+  return [...list.filter((x) => star.has(x)), ...list.filter((x) => !star.has(x))];
+}
+
+// The antecedent / consequence lists in force for a client: its own custom lists, or the global ones.
+export function abcLists(settings, client) {
+  const own = client?.abc;
+  if (own) return { a: own.a || [], c: own.c || [], star: { a: own.star?.a || [], c: own.star?.c || [] } };
+  return { a: settings.abcA || [], c: settings.abcC || [], star: { a: settings.abcStar?.a || [], c: settings.abcStar?.c || [] } };
+}
+export function abcOptions(settings, client) {
+  const L = abcLists(settings, client);
+  return { a: orderOptions(L.a, L.star.a), c: orderOptions(L.c, L.star.c) };
+}
+
+// How often each option was used in these sessions' ABC entries. key = "a" or "c".
+export function usageCounts(sessions, key) {
+  const m = new Map();
+  for (const s of sessions) for (const tr of s.trackers || []) {
+    if (tr.type !== "abc") continue;
+    for (const ev of tr.events || []) {
+      if (ev.k !== "abc" || !ev[key]) continue;
+      const label = parseOption(ev[key]).label;
+      m.set(label, (m.get(label) || 0) + 1);
+    }
+  }
+  return m;
+}
+// Most used first; ties and unused options keep their current order.
+export function sortByUsage(list, counts) {
+  return list.map((x, i) => [x, counts.get(parseOption(x).label) || 0, i]).sort((p, q) => q[1] - p[1] || p[2] - q[2]).map((p) => p[0]);
+}
 
 export function newClient(first, school, label = "") {
   const now = Date.now();

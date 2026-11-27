@@ -186,3 +186,103 @@ export async function shareFile(file, title) {
   download(file, file.name);
   return "downloaded";
 }
+
+// ---------- reorderable list editor ----------
+// listEditor({ items, starred, onChange(items, starred), counts?: () => Map, placeholder, hint })
+// Drag the handle to reorder, ★ pins an option to the top, tap the text to edit it.
+// counts (optional) powers a one-off "Sort by most used" — the list never re-sorts by itself.
+export function listEditor({ items, starred = [], onChange, counts, placeholder = "Add an option", starrable = true, labelOf = (x) => x }) {
+  let list = [...items];
+  const star = new Set(starred.filter((x) => list.includes(x)));
+  const wrap = h("div", { class: "list-editor" });
+  const rows = h("div", { class: "le-rows" });
+  const commit = () => onChange([...list], list.filter((x) => star.has(x)));
+
+  const startDrag = (ev, row) => {
+    ev.preventDefault();
+    const handle = ev.currentTarget;
+    try { handle.setPointerCapture?.(ev.pointerId); } catch { /* moves are tracked on window anyway */ }
+    row.classList.add("dragging");
+    const move = (e) => {
+      const y = e.clientY;
+      const others = [...rows.children].filter((r) => r !== row);
+      const before = others.find((r) => { const b = r.getBoundingClientRect(); return y < b.top + b.height / 2; });
+      if (before) { if (row.nextSibling !== before) rows.insertBefore(row, before); }
+      else if (rows.lastChild !== row) rows.append(row);
+    };
+    const end = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      row.classList.remove("dragging");
+      const order = [...rows.children].map((r) => r.dataset.value);
+      if (order.join("\u0000") !== list.join("\u0000")) { list = order; commit(); }
+      draw();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  };
+
+  const edit = (row, value) => {
+    const input = h("input", { class: "input le-input", value, maxlength: 80 });
+    let finished = false;
+    const done = (keep) => {
+      if (finished) return;
+      finished = true;
+      const v = input.value.trim();
+      if (keep && v && v !== value && !list.includes(v)) {
+        list[list.indexOf(value)] = v;
+        if (star.delete(value)) star.add(v);
+        commit();
+      }
+      draw();
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); done(true); } else if (e.key === "Escape") done(false); });
+    input.addEventListener("blur", () => done(true));
+    row.querySelector(".le-text").replaceWith(input);
+    input.focus();
+  };
+
+  const draw = () => {
+    const shown = [...list.filter((x) => star.has(x)), ...list.filter((x) => !star.has(x))];
+    // Starred rows are pinned to the top, so the underlying order follows what's shown.
+    list = shown;
+    rows.replaceChildren(...shown.map((value) => {
+      const row = h("div", { class: `le-row ${star.has(value) ? "starred" : ""}`, "data-value": value });
+      row.append(
+        h("button", { class: "le-handle", type: "button", "aria-label": `Drag to reorder ${labelOf(value)}`, onpointerdown: (ev) => startDrag(ev, row) },
+          svg(P("M9 5h2v2H9zm4 0h2v2h-2zM9 11h2v2H9zm4 0h2v2h-2zm-4 6h2v2H9zm4 0h2v2h-2z"))),
+        starrable ? h("button", { class: `le-star ${star.has(value) ? "on" : ""}`, type: "button", "aria-pressed": star.has(value) ? "true" : "false",
+          "aria-label": star.has(value) ? `Unstar ${labelOf(value)}` : `Star ${labelOf(value)}`,
+          onclick: () => { star.has(value) ? star.delete(value) : star.add(value); commit(); draw(); } }, star.has(value) ? "★" : "☆") : null,
+        h("button", { class: "le-text", type: "button", onclick: () => edit(row, value) }, value),
+        h("button", { class: "le-del", type: "button", "aria-label": `Remove ${labelOf(value)}`, onclick: () => {
+          list = list.filter((x) => x !== value); star.delete(value); commit(); draw();
+        } }, icon.close()));
+      return row;
+    }));
+  };
+
+  const add = h("input", { class: "input", placeholder, maxlength: 80, enterkeyhint: "done" });
+  const doAdd = () => {
+    const v = add.value.trim();
+    if (!v) return;
+    if (list.includes(v)) { toast("Already in the list"); return; }
+    list.push(v); add.value = ""; commit(); draw();
+  };
+  add.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doAdd(); } });
+
+  draw();
+  wrap.append(rows,
+    h("div", { class: "le-add" }, add, h("button", { class: "btn", type: "button", onclick: doAdd }, icon.plus(), "Add")),
+    counts ? h("button", { class: "btn small ghost le-sort", type: "button", onclick: () => {
+      const c = counts();
+      if (![...c.values()].some(Boolean)) { toast("No ABC data yet to sort by"); return; }
+      // Most used first within the starred group and within the rest.
+      const by = (xs) => xs.map((x, i) => [x, c.get(labelOf(x)) || 0, i]).sort((p, q) => q[1] - p[1] || p[2] - q[2]).map((p) => p[0]);
+      list = [...by(list.filter((x) => star.has(x))), ...by(list.filter((x) => !star.has(x)))];
+      commit(); draw(); toast("Sorted by most used");
+    } }, "Sort by most used") : null);
+  return wrap;
+}

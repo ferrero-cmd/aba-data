@@ -1,8 +1,8 @@
 // Live data collection (one big tile per target) and the finished-session summary.
 import * as db from "./db.js";
-import { emailSession, buildWorkbook, preloadExcel } from "./export.js";
-import { activeMs, DBR_ITEMS, initials, isRunning, INTERVAL_TYPES, parseOption, targetSpec, TYPES } from "./model.js";
-import { durationOpen, fmtClock, fmtDate, fmtTime, intervalInfo, latencyOpen, sessionMs, summarize } from "./summary.js";
+import { emailSessions, buildWorkbook, preloadExcel } from "./export.js";
+import { abcBehaviors, abcOptions, activeMs, DBR_ITEMS, initials, isRunning, INTERVAL_TYPES, parseOption, targetSpec, TYPES } from "./model.js";
+import { durationOpen, fmtClock, fmtDate, fmtTime, intervalInfo, latencyOpen, periodAt, sessionMs, summarize } from "./summary.js";
 import { confirmSheet, flash, h, icon, sheet, toast } from "./ui.js";
 
 // ======================================================================
@@ -17,10 +17,15 @@ export async function liveSession(root, id, { go, settings, guard }) {
 
   const e = () => activeMs(session);
   const save = () => db.saveSession(session).catch(() => toast("Couldn't save — storage full?"));
+  // Period tagging is opt-in per client; a session that already has a period log keeps showing it.
+  const usePeriods = !!client.periods || (session.periodLog || []).length > 0;
+  session.periodLog ??= [];
+  const period = () => periodAt(session, e());
 
   function addEvent(i, ev, label) {
     const tr = session.trackers[i];
-    tr.events.push({ t: Date.now(), e: e(), ...ev });
+    const p = period();
+    tr.events.push({ t: Date.now(), e: e(), ...(p ? { p } : {}), ...ev });
     pushUndo({ i, kind: "ev", label: `${label} · ${tr.name}` });
   }
   function setInterval_(i, idx, value, label) {
@@ -40,7 +45,9 @@ export async function liveSession(root, id, { go, settings, guard }) {
     if (!u) return;
     if (u.kind === "ev") session.trackers[u.i].events.pop();
     else if (u.kind === "iv") { const iv = session.trackers[u.i].iv; if (u.prev == null) delete iv[u.idx]; else iv[u.idx] = u.prev; }
+    else if (u.kind === "period") session.periodLog.pop();
     save();
+    renderPeriods();
     refresh();
     toast(`Undid ${u.label}`);
   }
@@ -49,6 +56,24 @@ export async function liveSession(root, id, { go, settings, guard }) {
   const clock = h("div", { class: "live-clock" }, "0:00");
   const pauseBtn = h("button", { class: "pill-btn", onclick: togglePause });
   const undoBar = h("div", { class: "undo-bar" });
+  const periodRow = usePeriods ? h("div", { class: "period-row" }) : null;
+
+  function renderPeriods() {
+    if (!periodRow) return;
+    const current = period();
+    const names = [...new Set([...(settings.periods || []), ...session.periodLog.map((p) => p.name)])].filter(Boolean);
+    periodRow.replaceChildren(...names.map((n) => h("button", {
+      class: `chip ${n === current ? "on" : ""}`,
+      onclick: () => {
+        if (n === period()) return;
+        session.periodLog.push({ e: e(), t: Date.now(), name: n });
+        pushUndo({ kind: "period", label: `period ${n}` });
+        renderPeriods();
+        toast(`Now: ${n}`);
+      },
+    }, n)));
+    periodRow.querySelector(".on")?.scrollIntoView?.({ inline: "center", block: "nearest" });
+  }
 
   function togglePause() {
     const now = Date.now();
@@ -151,8 +176,24 @@ export async function liveSession(root, id, { go, settings, guard }) {
         const ring = ringEl();
         const prompt = h("div", { class: "tile-prompt" });
         const controls = h("div", { class: "moment-controls" });
+        const missedEl = h("div", { class: "missed-marks", "aria-live": "polite" });
+        name.after(missedEl);
         const el = T("span2", head, h("div", { class: "moment" }, h("div", { class: "ring-wrap small" }, ring.el), prompt), controls);
         let shownFor = -2;
+        let shownMissed = -1;
+        // Intervals whose answer window has passed without a tap (the pending one isn't missed yet).
+        const drawMissed = (info, idx) => {
+          let n = 0;
+          const upto = idx == null ? info.completed : idx;
+          for (let k = 0; k < upto; k++) if (tr.iv?.[k] == null) n++;
+          if (n === shownMissed) return;
+          shownMissed = n;
+          const MAX = 8;
+          missedEl.replaceChildren(...Array.from({ length: Math.min(n, MAX) }, () => h("i", { class: "miss" })),
+            n > MAX ? h("span", { class: "miss-more" }, `+${n - MAX}`) : null);
+          missedEl.title = n ? `${n} interval${n === 1 ? "" : "s"} missed (not scored)` : "";
+          missedEl.setAttribute("aria-label", missedEl.title);
+        };
         let count = null;
         const pendingIdx = (ms) => {
           const info = intervalInfo(tr, ms);
@@ -190,6 +231,7 @@ export async function liveSession(root, id, { go, settings, guard }) {
           const m = s.metrics[0].value;
           stat.textContent = m == null ? "" : tr.type === "rating" ? `${m} avg` : `${m}%`;
           const idx = pendingIdx(ms);
+          drawMissed(info, idx);
           el.classList.toggle("pending", idx != null);
           if (info.finished && idx == null) {
             ring.set(1, "✓"); prompt.textContent = `Done · ${info.completed} intervals`; el.classList.add("finished");
@@ -233,29 +275,44 @@ export async function liveSession(root, id, { go, settings, guard }) {
   }
 
   // ---------- ABC + DBR sheets ----------
+  // The Behavior row lists this ABC target's own behaviors (never other trackers' names).
+  // Several can be picked when they happen together; they're saved as one entry.
   function abcSheet(i) {
-    const problem = session.trackers.filter((t) => ["frequency", "duration", "pir"].includes(t.type));
-    const behaviors = [...new Set((problem.length ? problem : session.trackers.filter((t) => !["abc", "dbr"].includes(t.type))).map((t) => t.name))];
-    const pick = { a: null, b: behaviors.length === 1 ? behaviors[0] : null, c: null };
+    const tr = session.trackers[i];
+    const behaviors = abcBehaviors(tr);
+    const opts = abcOptions(settings, client);
+    const pick = { a: null, c: null, b: new Set(behaviors.length === 1 ? behaviors : []) };
     const note = h("textarea", { class: "input", rows: 2, placeholder: "Notes (optional)" });
-    const row = (key, title, options) => {
+    const other = h("input", { class: "input abc-other", placeholder: "Describe the behavior", maxlength: 60, hidden: true });
+    const title = (key, text) => h("div", { class: "abc-title" }, h("span", { class: "abc-letter" }, key.toUpperCase()), text);
+    const row = (key, text, options) => {
       const wrap = h("div", { class: "chips wrap" });
-      const draw = () => wrap.replaceChildren(...options.map((opt) => {
-        const label = parseOption(opt).label;
-        return h("button", { class: `chip ${pick[key] === opt ? "on" : ""}`, type: "button",
-          onclick: () => { pick[key] = pick[key] === opt ? null : opt; draw(); } }, label);
-      }));
+      const draw = () => wrap.replaceChildren(...options.map((opt) =>
+        h("button", { class: `chip ${pick[key] === opt ? "on" : ""}`, type: "button",
+          onclick: () => { pick[key] = pick[key] === opt ? null : opt; draw(); } }, parseOption(opt).label)));
       draw();
-      return h("div", { class: "abc-row" }, h("div", { class: "abc-title" }, h("span", { class: "abc-letter" }, key.toUpperCase()), title), wrap);
+      return h("div", { class: "abc-row" }, title(key, text), wrap);
     };
+    const bWrap = h("div", { class: "chips wrap" });
+    const drawB = () => {
+      bWrap.replaceChildren(...[...behaviors, "Other"].map((b) =>
+        h("button", { class: `chip ${pick.b.has(b) ? "on" : ""}`, type: "button", onclick: () => {
+          pick.b.has(b) ? pick.b.delete(b) : pick.b.add(b);
+          drawB();
+          if (b === "Other" && pick.b.has(b)) other.focus();
+        } }, b)));
+      other.hidden = !pick.b.has("Other");
+    };
+    drawB();
     sheet("Log ABC", (close) => h("div", {},
-      row("a", "Antecedent", settings.abcA),
-      row("b", "Behavior", behaviors.length ? [...behaviors, "Other"] : ["Target behavior", "Other"]),
-      row("c", "Consequence", settings.abcC),
+      row("a", "Antecedent", opts.a),
+      h("div", { class: "abc-row" }, title("b", behaviors.length > 1 ? "Behavior · pick all that happened" : "Behavior"), bWrap, other),
+      row("c", "Consequence", opts.c),
       note,
       h("button", { class: "btn big primary sticky-action", onclick: () => {
-        if (!pick.a && !pick.b && !pick.c && !note.value.trim()) { toast("Pick at least one"); return; }
-        addEvent(i, { k: "abc", a: pick.a ? parseOption(pick.a).label : "", b: pick.b || "", c: pick.c || "", note: note.value.trim() }, "ABC");
+        const bs = [...behaviors.filter((b) => pick.b.has(b)), ...(pick.b.has("Other") ? [other.value.trim() || "Other"] : [])];
+        if (!pick.a && !bs.length && !pick.c && !note.value.trim()) { toast("Pick at least one"); return; }
+        addEvent(i, { k: "abc", a: pick.a ? parseOption(pick.a).label : "", b: bs.join(" + "), bs, c: pick.c || "", note: note.value.trim() }, "ABC");
         close();
         toast("ABC saved");
       } }, "Save ABC")), { className: "tall" });
@@ -271,7 +328,7 @@ export async function liveSession(root, id, { go, settings, guard }) {
       return h("div", { class: "dbr-item" }, h("div", { class: "dbr-label" }, h("b", {}, it.label), h("span", { class: "muted small" }, ` · ${it.hint}`)), wrap,
         h("div", { class: "dbr-ends small muted" }, h("span", {}, "0 Never"), h("span", {}, "5 Sometimes"), h("span", {}, "10 Always")));
     });
-    sheet("Rate this session", (close) => h("div", {}, ...rows,
+    sheet(period() ? `Rate · ${period()}` : "Rate this session", (close) => h("div", {}, ...rows,
       h("button", { class: "btn big primary sticky-action", onclick: () => {
         if (DBR_ITEMS.some((it) => vals[it.key] == null)) { toast("Rate all three"); return; }
         addEvent(i, { k: "dbr", ...vals }, "DBR");
@@ -314,7 +371,7 @@ export async function liveSession(root, id, { go, settings, guard }) {
   async function finishTo(to) {
     const now = Date.now();
     session.trackers.forEach((tr) => {
-      if (tr.type === "duration" && durationOpen(tr)) tr.events.push({ t: now, e: e(), k: "stop" });
+      if (tr.type === "duration" && durationOpen(tr)) tr.events.push({ t: now, e: e(), ...(period() ? { p: period() } : {}), k: "stop" });
     });
     const seg = session.segments.at(-1);
     if (seg && seg.e == null) seg.e = now;
@@ -360,8 +417,10 @@ export async function liveSession(root, id, { go, settings, guard }) {
       pauseBtn,
       h("button", { class: "pill-btn danger", onclick: () => endSession() }, icon.stop(), "End")),
     h("div", { class: "live-head" }, clock, h("div", { class: "live-sub muted" }, `Started ${fmtTime(session.startedAt)}`)),
+    periodRow,
     grid,
     undoBar));
+  renderPeriods();
   refresh();
   const timer = setInterval(tick, 250);
 
@@ -410,9 +469,10 @@ export async function sessionSummary(root, id, { go }) {
   if (session.status === "active") { go(`#/s/${id}`, true); return; }
   const client = await db.get("clients", session.clientId);
   const e = sessionMs(session);
+  const allSessions = await db.sessionsFor(client.id);
 
   let prepared = null;
-  const prepare = () => { prepared = buildWorkbook(client, session).catch(() => null); };
+  const prepare = () => { prepared = buildWorkbook(client, [session], allSessions).catch(() => null); };
   preloadExcel().then(prepare);
 
   const notes = h("textarea", { class: "input", rows: 3, placeholder: "Session notes (setting, staff, anything unusual)…", value: session.notes || "" });
@@ -427,19 +487,20 @@ export async function sessionSummary(root, id, { go }) {
     try {
       if (notes.value !== (session.notes || "")) { session.notes = notes.value; await db.saveSession(session); prepare(); }
       const file = await prepared;
-      const result = await emailSession(client, session, file || undefined);
+      const result = await emailSessions(client, [session], file || undefined, allSessions);
       if (result === "shared" || result === "downloaded") { session.exportedAt = Date.now(); await db.saveSession(session); }
     } catch (err) { toast(err.message || "Couldn't make the Excel file"); }
     emailBtn.disabled = false;
   } }, icon.mail(), "Email Excel");
 
+  const periods = [...new Set((session.periodLog || []).map((p) => p.name).filter(Boolean))];
   root.append(h("main", { class: "view" },
     h("header", { class: "topbar" },
       h("button", { class: "back-btn", onclick: () => go(`#/c/${client.id}`) }, icon.back(), initials(client))),
     h("div", { class: "hero" },
       h("div", { class: "eyebrow" }, fmtDate(session.startedAt)),
       h("h1", {}, `${hm(session.startedAt)} – ${hm(session.endedAt)}`),
-      h("div", { class: "muted" }, `${fmtClock(e)} observed`)),
+      h("div", { class: "muted" }, `${fmtClock(e)} observed${periods.length ? ` · ${periods.join(", ")}` : ""}`)),
     h("div", { class: "actions" }, emailBtn,
       session.exportedAt ? h("div", { class: "muted small center" }, `Last exported ${fmtDate(session.exportedAt)} ${fmtTime(session.exportedAt)}`) : null),
     ...session.trackers.map((tr) => {

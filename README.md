@@ -33,7 +33,7 @@ A session runs several targets at once. Interval cue is a silent screen-edge fla
 | `tests/` | `node --test tests/` |
 | `docs/AMANDA.md` | One-page how-to for users |
 | `docs/SHARING.md` | Publishing on GitHub Pages and installing on an iPhone |
-| `docs/IDEAS.md` | Parked features (period / activity tagging + scatterplot) and how to bring them back |
+| `docs/IDEAS.md` | Parked features and ideas for later |
 
 ## Develop
 
