@@ -93,7 +93,9 @@ export async function liveSession(root, id, { go, settings, guard }) {
 
   function buildTile(tr, i) {
     const name = h("div", { class: "tile-name" }, tr.name);
-    const spec = h("div", { class: "tile-spec" }, targetSpec(tr));
+    // The type name is shown in capitals, the interval length isn't ("MTS · 15s", not "15S").
+    const [specType, ...specRest] = targetSpec(tr).split(" · ");
+    const spec = h("div", { class: "tile-spec" }, specType, specRest.length ? h("span", { class: "spec-len" }, ` · ${specRest.join(" · ")}`) : null);
     const stat = h("div", { class: "tile-stat" });
     const head = h("div", { class: "tile-head" }, h("div", { class: "grow" }, name, spec), stat);
     const T = (cls, ...kids) => h("div", { class: `tile t-${tr.type} ${cls}` }, ...kids);
@@ -182,7 +184,8 @@ export async function liveSession(root, id, { go, settings, guard }) {
         const many = tr.type === "rating" && (tr.config.ratingMax || 5) > 6;
         const el = T(`span2 ${many ? "many-controls" : ""}`, missedEl, head,
           h("div", { class: "moment" }, h("div", { class: "ring-wrap small" }, ring.el), prompt, controls));
-        const specText = spec.textContent;
+        const specNodes = [...spec.childNodes];
+        let asking = null;
         let shownFor = -2;
         let shownMissed = -1;
         // Intervals whose answer window has passed without a tap (the pending one isn't missed yet).
@@ -242,8 +245,12 @@ export async function liveSession(root, id, { go, settings, guard }) {
           drawMissed(info, idx);
           el.classList.toggle("pending", idx != null);
           const q = tr.type === "mts" ? "Happening right now?" : tr.type === "rating" ? "Rate the interval" : "How many engaged?";
-          const specNow = idx != null ? `${q} · #${idx + 1}` : specText;
-          if (spec.textContent !== specNow) { spec.textContent = specNow; spec.classList.toggle("ask", idx != null); }
+          const askNow = idx != null ? `${q} · #${idx + 1}` : null;
+          if (askNow !== asking) {
+            asking = askNow;
+            spec.replaceChildren(...(askNow ? [askNow] : specNodes));
+            spec.classList.toggle("ask", !!askNow);
+          }
           if (info.finished && idx == null) {
             ring.set(1, "✓"); prompt.textContent = `Done · ${info.completed} intervals`; el.classList.add("finished");
           } else {

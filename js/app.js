@@ -432,7 +432,7 @@ export function targetSheet(client, target, onSaved) {
     })));
     if (INTERVAL_TYPES.has(type)) {
       cfgBox.append(h("div", { class: "chips wrap presets" }, h("span", { class: "muted small" }, "Quick:"),
-        ...[10, 15, 30, 60, 300].map((sec) => h("button", { class: "chip", type: "button", onclick: () => { cfg.intervalSec = sec; drawCfg(); } }, sec >= 60 ? `${sec / 60} min` : `${sec} s`))));
+        ...[10, 15, 30, 60, 300].map((sec) => h("button", { class: "chip", type: "button", onclick: () => { cfg.intervalSec = sec; drawCfg(); } }, sec >= 60 ? `${sec / 60}m` : `${sec}s`))));
     }
   };
 
@@ -605,7 +605,7 @@ async function settingsView() {
       h("h2", { class: "card-title" }, "Privacy"),
       h("p", { class: "muted small" }, "Clients are identified by initials only. Nothing is sent anywhere — no accounts, no servers, no analytics. Data leaves the phone only when you email an Excel file or save a backup."),
     ),
-    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.8.4"))));
+    h("p", { class: "muted small center" }, "ABA Data · v", h("span", { id: "app-version" }, "1.8.5"))));
 }
 
 // ======================================================================

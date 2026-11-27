@@ -214,12 +214,12 @@ export function newTarget(name, type, config = {}, definition = "") {
 export const initials = (c) => `${c.first} · ${c.school}`;
 export const emailSubject = (c) => `Data Collection - ${c.first} ${c.school}`;
 
-// One-line description of a target's settings, e.g. "MTS · 15 s".
+// One-line description of a target's settings, e.g. "MTS · 15s" or "Rating · 5m".
 export function targetSpec(t) {
   const T = TYPES[t.type];
   if (!INTERVAL_TYPES.has(t.type)) return T.short;
   const c = t.config || {};
-  const len = c.intervalSec >= 60 && c.intervalSec % 60 === 0 ? `${c.intervalSec / 60} min` : `${c.intervalSec} s`;
+  const len = c.intervalSec >= 60 && c.intervalSec % 60 === 0 ? `${c.intervalSec / 60}m` : `${c.intervalSec}s`;
   return `${T.short} · ${len}${c.intervalCount ? ` × ${c.intervalCount}` : ""}`;
 }
 
