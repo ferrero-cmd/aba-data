@@ -66,6 +66,70 @@ export function toast(message, ms = 2400) {
   toastTimer = setTimeout(() => t.classList.remove("show"), ms);
 }
 
+// ---------- end-of-session celebration ----------
+// A short cheer and a confetti burst. Sits on top of whatever screen comes next; tap or wait to dismiss.
+const CHEERS = [
+  (n) => `Good work today${n}!`,
+  (n) => `Great session${n}!`,
+  (n) => `Nailed it${n}!`,
+  (n) => `Another one in the books${n}!`,
+  (n) => `Way to go${n}!`,
+  (n) => `That's a wrap${n}. Nice job!`,
+];
+export function celebrate(name = "") {
+  document.querySelector(".cheer")?.remove();
+  const n = name.trim() ? `, ${name.trim().split(/\s+/)[0]}` : "";
+  const text = CHEERS[Math.floor(Math.random() * CHEERS.length)](n);
+  const calm = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const canvas = h("canvas", { class: "cheer-confetti", "aria-hidden": "true" });
+  const card = h("div", { class: "cheer-card", role: "status" }, h("div", { class: "cheer-emoji" }, "🥳"), h("div", { class: "cheer-text" }, text));
+  const wrap = h("div", { class: "cheer" }, canvas, card);
+  let done = false;
+  const dismiss = () => {
+    if (done) return;
+    done = true;
+    wrap.classList.add("out");
+    setTimeout(() => wrap.remove(), 350);
+  };
+  wrap.addEventListener("pointerdown", dismiss);
+  document.body.append(wrap);
+  setTimeout(dismiss, 2800);
+  if (calm) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const W = window.innerWidth, H = window.innerHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const colors = ["#0f766e", "#14b8a6", "#f59e0b", "#ef4444", "#3b82f6", "#a855f7", "#ec4899", "#84cc16"];
+  const bits = Array.from({ length: 140 }, () => {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.9;
+    const v = 7 + Math.random() * 9;
+    return { x: W / 2, y: H * 0.42, vx: Math.cos(a) * v, vy: Math.sin(a) * v, w: 6 + Math.random() * 6, hgt: 4 + Math.random() * 6,
+      r: Math.random() * 6.3, vr: (Math.random() - 0.5) * 0.4, c: colors[Math.floor(Math.random() * colors.length)] };
+  });
+  // Physics runs in fixed 16 ms steps caught up to real time, so a slow or throttled phone still gets the full burst.
+  const start = performance.now();
+  let simulated = 0;
+  const step = (now) => {
+    const t = now - start;
+    if (t > 2600 || !wrap.isConnected) return;
+    for (; simulated + 16 <= t; simulated += 16) for (const b of bits) {
+      b.vy += 0.32; b.vx *= 0.985; b.vy *= 0.985;
+      b.x += b.vx; b.y += b.vy; b.r += b.vr;
+    }
+    ctx.clearRect(0, 0, W, H);
+    ctx.globalAlpha = t > 1900 ? Math.max(0, 1 - (t - 1900) / 700) : 1;
+    for (const b of bits) {
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.r);
+      ctx.fillStyle = b.c; ctx.fillRect(-b.w / 2, -b.hgt / 2, b.w, b.hgt * Math.abs(Math.cos(b.r * 2)));
+      ctx.restore();
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 // ---------- bottom sheet ----------
 // While any sheet is open the page behind it must not scroll. iOS ignores overflow:hidden for touch
 // scrolling, so the body is pinned in place (position: fixed) and restored on close.

@@ -402,6 +402,10 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 .abc-title { font-weight: 750; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .abc-letter { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; font-size: 14px; }
 .abc-row .chip { min-height: 44px; }
+.abc-other { margin-top: 12px; }
+.abc-row.need .abc-title { color: var(--no); animation: abc-shake .35s; }
+.abc-row.need .abc-letter { background: var(--no); }
+@keyframes abc-shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 .dbr-item { margin-bottom: 18px; }
 .dbr-label { margin-bottom: 8px; }
 .dbr-scale { display: grid; grid-template-columns: repeat(11, 1fr); gap: 4px; }
@@ -523,7 +527,11 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 .tile:not(.span2) .tile-state { font-size: 14px; }
 
 /* Missed (unscored) intervals on MTS / PLACHECK / rating tiles: tiny red x marks that pile up. */
-.missed-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; min-height: 0; margin-top: 3px; }
+.missed-marks {
+  position: absolute; top: 5px; right: 12px; display: flex; flex-wrap: nowrap; align-items: center; gap: 3px;
+  pointer-events: none; z-index: 1;
+}
+.tile.t-mts .tile-stat, .tile.t-placheck .tile-stat, .tile.t-rating .tile-stat { margin-top: 8px; }
 .missed-marks:empty { display: none; }
 .missed-marks .miss { position: relative; width: 7px; height: 7px; display: inline-block; }
 .missed-marks .miss::before, .missed-marks .miss::after {
@@ -559,3 +567,16 @@ details.more summary { color: var(--muted); padding: 14px 4px; font-weight: 600;
 .row-btns { display: flex; gap: 8px; }
 .check-row.sent { opacity: .62; }
 .check-row.sent .badge { opacity: 1; }
+
+/* ---------- end-of-session celebration ---------- */
+.cheer { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; transition: opacity .35s; }
+.cheer.out { opacity: 0; }
+.cheer-confetti { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cheer-card {
+  position: relative; background: var(--surface); border: 1.5px solid var(--line); border-radius: 24px; box-shadow: var(--shadow);
+  padding: 22px 26px; margin: 0 24px; text-align: center; max-width: 320px; animation: cheer-pop .45s cubic-bezier(.2, 1.4, .4, 1);
+}
+.cheer-emoji { font-size: 52px; line-height: 1; margin-bottom: 8px; }
+.cheer-text { font-size: 21px; font-weight: 750; line-height: 1.25; }
+@keyframes cheer-pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .cheer-card { animation: none; } }

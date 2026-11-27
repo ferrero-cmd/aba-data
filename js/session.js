@@ -3,7 +3,7 @@ import * as db from "./db.js";
 import { emailSessions, buildWorkbook, preloadExcel } from "./export.js";
 import { abcBehaviors, abcOptions, activeMs, DBR_ITEMS, initials, isRunning, INTERVAL_TYPES, parseOption, targetSpec, TYPES } from "./model.js";
 import { durationOpen, fmtClock, fmtDate, fmtTime, intervalInfo, latencyOpen, periodAt, sessionMs, summarize } from "./summary.js";
-import { confirmSheet, flash, h, icon, sheet, toast } from "./ui.js";
+import { celebrate, confirmSheet, flash, h, icon, sheet, toast } from "./ui.js";
 
 // ======================================================================
 // Live session
@@ -176,9 +176,9 @@ export async function liveSession(root, id, { go, settings, guard }) {
         const ring = ringEl();
         const prompt = h("div", { class: "tile-prompt" });
         const controls = h("div", { class: "moment-controls" });
+        // Pinned to the card's top-right corner so new marks never change the card's height.
         const missedEl = h("div", { class: "missed-marks", "aria-live": "polite" });
-        name.after(missedEl);
-        const el = T("span2", head, h("div", { class: "moment" }, h("div", { class: "ring-wrap small" }, ring.el), prompt), controls);
+        const el = T("span2", missedEl, head, h("div", { class: "moment" }, h("div", { class: "ring-wrap small" }, ring.el), prompt), controls);
         let shownFor = -2;
         let shownMissed = -1;
         // Intervals whose answer window has passed without a tap (the pending one isn't missed yet).
@@ -279,40 +279,75 @@ export async function liveSession(root, id, { go, settings, guard }) {
   // Several can be picked when they happen together; they're saved as one entry.
   function abcSheet(i) {
     const tr = session.trackers[i];
-    const behaviors = abcBehaviors(tr);
+    const own = abcBehaviors(tr);
+    // Behaviors typed under "Other" during this session join the chips (this session only, not the target).
+    tr.adhoc = tr.adhoc || [];
+    const behaviors = () => [...own, ...tr.adhoc.filter((b) => !own.includes(b))];
     const opts = abcOptions(settings, client);
-    const pick = { a: null, c: null, b: new Set(behaviors.length === 1 ? behaviors : []) };
+    const pick = { a: null, c: null, b: new Set(own.length === 1 && !tr.adhoc.length ? own : []) };
     const note = h("textarea", { class: "input", rows: 2, placeholder: "Notes (optional)" });
-    const other = h("input", { class: "input abc-other", placeholder: "Describe the behavior", maxlength: 60, hidden: true });
+    const other = h("input", { class: "input abc-other", placeholder: "Describe the behavior, then tap return", maxlength: 60, hidden: true, enterkeyhint: "done" });
+    const rows = {};
     const title = (key, text) => h("div", { class: "abc-title" }, h("span", { class: "abc-letter" }, key.toUpperCase()), text);
     const row = (key, text, options) => {
       const wrap = h("div", { class: "chips wrap" });
       const draw = () => wrap.replaceChildren(...options.map((opt) =>
         h("button", { class: `chip ${pick[key] === opt ? "on" : ""}`, type: "button",
-          onclick: () => { pick[key] = pick[key] === opt ? null : opt; draw(); } }, parseOption(opt).label)));
+          onclick: () => { pick[key] = pick[key] === opt ? null : opt; rows[key].classList.remove("need"); draw(); } }, parseOption(opt).label)));
       draw();
-      return h("div", { class: "abc-row" }, title(key, text), wrap);
+      return (rows[key] = h("div", { class: "abc-row" }, title(key, text), wrap));
     };
     const bWrap = h("div", { class: "chips wrap" });
     const drawB = () => {
-      bWrap.replaceChildren(...[...behaviors, "Other"].map((b) =>
+      bWrap.replaceChildren(...[...behaviors(), "Other"].map((b) =>
         h("button", { class: `chip ${pick.b.has(b) ? "on" : ""}`, type: "button", onclick: () => {
           pick.b.has(b) ? pick.b.delete(b) : pick.b.add(b);
+          rows.b.classList.remove("need");
           drawB();
           if (b === "Other" && pick.b.has(b)) other.focus();
         } }, b)));
       other.hidden = !pick.b.has("Other");
     };
+    // Turn the typed "Other" text into its own chip (selected), leaving "Other" free for the next one.
+    const commitOther = () => {
+      const text = other.value.trim();
+      if (!text) return false;
+      const existing = behaviors().find((b) => b.toLowerCase() === text.toLowerCase());
+      const name = existing || text;
+      if (!existing) tr.adhoc.push(name);
+      pick.b.delete("Other");
+      pick.b.add(name);
+      other.value = "";
+      rows.b.classList.remove("need");
+      save();
+      drawB();
+      return true;
+    };
+    other.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      if (commitOther()) other.blur();
+    });
+    rows.b = h("div", { class: "abc-row" }, title("b", "Behavior · pick all that happened"), bWrap, other);
     drawB();
     sheet("Log ABC", (close) => h("div", {},
       row("a", "Antecedent", opts.a),
-      h("div", { class: "abc-row" }, title("b", behaviors.length > 1 ? "Behavior · pick all that happened" : "Behavior"), bWrap, other),
+      rows.b,
       row("c", "Consequence", opts.c),
       note,
       h("button", { class: "btn big primary sticky-action", onclick: () => {
-        const bs = [...behaviors.filter((b) => pick.b.has(b)), ...(pick.b.has("Other") ? [other.value.trim() || "Other"] : [])];
-        if (!pick.a && !bs.length && !pick.c && !note.value.trim()) { toast("Pick at least one"); return; }
-        addEvent(i, { k: "abc", a: pick.a ? parseOption(pick.a).label : "", b: bs.join(" + "), bs, c: pick.c || "", note: note.value.trim() }, "ABC");
+        commitOther();
+        pick.b.delete("Other");
+        const bs = behaviors().filter((b) => pick.b.has(b));
+        const missing = [["a", "an antecedent", pick.a], ["b", "a behavior", bs.length], ["c", "a consequence", pick.c]].filter((m) => !m[2]);
+        if (missing.length) {
+          missing.forEach(([k]) => { rows[k].classList.remove("need"); void rows[k].offsetWidth; rows[k].classList.add("need"); });
+          rows[missing[0][0]].scrollIntoView({ block: "center", behavior: "smooth" });
+          const names = missing.map((m) => m[1]);
+          toast(`Pick ${names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names.at(-1) : names[0]}`);
+          return;
+        }
+        addEvent(i, { k: "abc", a: parseOption(pick.a).label, b: bs.join(" + "), bs, c: pick.c, note: note.value.trim() }, "ABC");
         close();
         toast("ABC saved");
       } }, "Save ABC")), { className: "tall" });
@@ -380,6 +415,7 @@ export async function liveSession(root, id, { go, settings, guard }) {
     delete session.undo;
     await db.saveSession(session);
     leave(to || `#/r/${session.id}`, true);
+    celebrate(session.observer || settings.observer || "");
   }
 
   // ---------- refresh / tick ----------
